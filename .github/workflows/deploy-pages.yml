@@ -23,8 +23,16 @@ jobs:
     timeout-minutes: 10
     env:
       VITE_API_URL: https://francescoborri.ddns.net/wikiparchino
+      VITE_BASE_PATH: /wikiparchino/
 
     steps:
+      - name: Verify repository name
+        run: |
+          if [ "$GITHUB_REPOSITORY" != "ilparchino/wikiparchino" ]; then
+            echo "This site must be deployed from ilparchino/wikiparchino so GitHub Pages uses /wikiparchino/."
+            exit 1
+          fi
+
       - name: Check out repository
         uses: actions/checkout@v7
 

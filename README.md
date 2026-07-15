@@ -88,7 +88,7 @@ Start the Vite development server:
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open `http://127.0.0.1:5173/wiki/`.
+Open `http://127.0.0.1:5173/wikiparchino/`.
 
 ## Available Scripts
 
@@ -124,7 +124,7 @@ Manual acceptance should cover login, navigation, each entity list/detail/form, 
 ## Deployment Notes
 
 - `dist/` is generated and must not be committed on the source branch.
-- Vite uses the `/wiki/` project base and hash routes, so direct URLs have the form `https://ilparchino.github.io/wiki/#/people/1`.
+- Vite uses the `/wikiparchino/` project base and hash routes, so direct URLs have the form `https://ilparchino.github.io/wikiparchino/#/people/1`.
 - The Pages workflow builds with `VITE_API_URL=https://francescoborri.ddns.net/wikiparchino`.
 - An HTTPS frontend must use an HTTPS backend to avoid browser mixed-content blocking.
 - The deployed backend CORS origin must exactly match the public frontend origin.
@@ -132,12 +132,12 @@ Manual acceptance should cover login, navigation, each entity list/detail/form, 
 
 ### GitHub Pages
 
-The deployment workflow is already available at `.github/workflows/deploy-pages.yml`. After initializing this directory as the `ilparchino/wiki` repository and pushing the `main` branch:
+The deployment workflow is already available at `.github/workflows/deploy-pages.yml`. It expects the repository to be named `ilparchino/wikiparchino`, matching the required GitHub Pages path. After pushing the `main` branch:
 
 1. Open the repository on GitHub and go to **Settings > Pages**.
 2. Under **Build and deployment**, select **GitHub Actions** as the source.
 3. Push to `main` or run **Deploy GitHub Pages** manually from the Actions tab.
-4. Wait for the `github-pages` environment deployment, then open `https://ilparchino.github.io/wiki/`.
+4. Wait for the `github-pages` environment deployment, then open `https://ilparchino.github.io/wikiparchino/#/`.
 
 The workflow uses `npm ci`; all packages are installed into the workflow workspace from `package-lock.json`, with no global npm packages required.
 
