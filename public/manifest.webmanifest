@@ -1,0 +1,17 @@
+{
+  "name": "Wiki Parchino",
+  "short_name": "Parchino",
+  "start_url": "/wiki/#/",
+  "scope": "/wiki/",
+  "display": "standalone",
+  "background_color": "#f7f4ed",
+  "theme_color": "#1f7a4d",
+  "icons": [
+    {
+      "src": "/wiki/brand/logo-mono.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
