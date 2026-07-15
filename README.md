@@ -98,6 +98,7 @@ Open `http://127.0.0.1:5173/wikiparchino/`.
 | `npm test` | Run the frontend test suite once. |
 | `npm run build` | Type-check the source and create `dist/`. |
 | `npm run preview` | Serve the production build locally. |
+| `npm run generate:favicons` | Regenerate browser and PWA icons from the high-resolution source using ffmpeg. |
 
 ## Testing
 

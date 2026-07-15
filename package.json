@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "generate:favicons": "bash scripts/generate-favicons.sh"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
