@@ -22,7 +22,7 @@ function trimTrailingSlash(value: string): string {
 }
 
 export function resolveApiBase(
-  configuredUrl: string | undefined = import.meta.env.VITE_API_URL,
+  configuredUrl: string | undefined,
   location: Pick<Location, 'protocol' | 'hostname'> | undefined = typeof window === 'undefined' ? undefined : window.location,
 ): string {
   if (configuredUrl && configuredUrl.trim().length > 0) {
@@ -34,7 +34,7 @@ export function resolveApiBase(
   return `${protocol}//${hostname}:8000`;
 }
 
-export const API_BASE = resolveApiBase();
+export const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL);
 
 type EntityPayload<T> = Omit<T, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>;
 type EventPayload = Omit<EntityPayload<Event>, 'place' | 'epoch'>;
