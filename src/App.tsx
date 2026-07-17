@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DependencyList, type FormEvent, type ReactNode } from 'react';
 import {
   HashRouter,
   Link,
@@ -9,7 +9,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
-import { api } from './api';
+import { api, formatError } from './api';
 import { getAccessToken, subscribeToSessionLoss } from './auth';
 import type {
   Connotation,
@@ -127,8 +127,8 @@ function useAsync<T>(loader: () => Promise<T>, deps: DependencyList) {
       .then((value) => {
         if (!cancelled) setData(value);
       })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+      .catch((err: unknown) => {
+        if (!cancelled) setError(formatError(err, 'Non è stato possibile caricare i dati.'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -150,7 +150,7 @@ function Loading() {
   );
 }
 
-function ErrorAlert({ message }: { message: string }) {
+function ErrorAlert({ message }: { message: string; }) {
   return (
     <div className="alert alert-danger" role="alert">
       {message}
@@ -158,7 +158,7 @@ function ErrorAlert({ message }: { message: string }) {
   );
 }
 
-function EmptyState({ children }: { children: string }) {
+function EmptyState({ children }: { children: string; }) {
   return <div className="border rounded p-4 text-center text-secondary bg-white">{children}</div>;
 }
 
@@ -209,7 +209,7 @@ function AppRoot() {
   return <AuthenticatedApp user={user} onLogout={() => setUser(null)} />;
 }
 
-function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
+function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -224,7 +224,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
     try {
       onLogin(await api.login(username, password));
     } catch (err) {
-      setError((err as Error).message);
+      setError(formatError(err, 'Non è stato possibile effettuare l’accesso.'));
     } finally {
       setSubmitting(false);
     }
@@ -244,7 +244,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
                   <form className="card-body p-4 p-lg-5" onSubmit={submit}>
                     <p className="text-uppercase small fw-semibold text-secondary mb-2">{seasonData.label}</p>
                     <h1 className="h3 mb-3">Accedi a Wiki Parchino</h1>
-                    <p className="text-secondary">Archivio privato del gruppo Parchino.</p>
+                    <p className="text-secondary">Un'estesa wiki della lore del Parchino.</p>
                     {error && <ErrorAlert message={error} />}
                     <div className="mb-3">
                       <label className="form-label" htmlFor="username">
@@ -290,7 +290,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   );
 }
 
-function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void }) {
+function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void; }) {
   const [open, setOpen] = useState(false);
 
   async function logout() {
@@ -450,7 +450,7 @@ function Dashboard() {
   );
 }
 
-function MetricCard({ label, value, to, icon }: { label: string; value: number; to: string; icon: string }) {
+function MetricCard({ label, value, to, icon }: { label: string; value: number; to: string; icon: string; }) {
   return (
     <div className="col-6 col-xl-3">
       <Link className="metric-card border rounded bg-white p-3 text-decoration-none d-block" to={to}>
@@ -607,7 +607,7 @@ function ListPage({
   );
 }
 
-function EntityList<T extends { id: number }>({
+function EntityList<T extends { id: number; }>({
   items,
   entityType,
   titleFor,
@@ -633,7 +633,7 @@ function EntityList<T extends { id: number }>({
   );
 }
 
-function PersonForm({ mode }: { mode: 'create' | 'edit' }) {
+function PersonForm({ mode }: { mode: 'create' | 'edit'; }) {
   const { id } = useParams();
   const personId = parseRouteId(id);
   const navigate = useNavigate();
@@ -683,7 +683,7 @@ function PersonForm({ mode }: { mode: 'create' | 'edit' }) {
       const saved = isEdit && personId ? await api.updatePerson(personId, payload) : await api.createPerson(payload);
       navigate(`/people/${saved.id}`);
     } catch (err) {
-      setSubmitError((err as Error).message);
+      setSubmitError(formatError(err, 'Non è stato possibile salvare le modifiche.'));
     }
   }
 
@@ -734,11 +734,11 @@ function PersonForm({ mode }: { mode: 'create' | 'edit' }) {
   );
 }
 
-function PlaceForm({ mode }: { mode: 'create' | 'edit' }) {
+function PlaceForm({ mode }: { mode: 'create' | 'edit'; }) {
   return <NamedEntityForm<Place> mode={mode} entityType="place" load={api.place} create={api.createPlace} update={api.updatePlace} />;
 }
 
-function EpochForm({ mode }: { mode: 'create' | 'edit' }) {
+function EpochForm({ mode }: { mode: 'create' | 'edit'; }) {
   return <NamedEntityForm<Epoch> mode={mode} entityType="epoch" load={api.epoch} create={api.createEpoch} update={api.updateEpoch} />;
 }
 
@@ -752,8 +752,8 @@ function NamedEntityForm<T extends Place | Epoch>({
   mode: 'create' | 'edit';
   entityType: 'place' | 'epoch';
   load: (id: number) => Promise<T>;
-  create: (payload: { name: string; description: string | null; rarity: number }) => Promise<T>;
-  update: (id: number, payload: { name: string; description: string | null; rarity: number }) => Promise<T>;
+  create: (payload: { name: string; description: string | null; rarity: number; }) => Promise<T>;
+  update: (id: number, payload: { name: string; description: string | null; rarity: number; }) => Promise<T>;
 }) {
   const { id } = useParams();
   const entityId = parseRouteId(id);
@@ -778,7 +778,7 @@ function NamedEntityForm<T extends Place | Epoch>({
       const saved = isEdit && entityId ? await update(entityId, payload) : await create(payload);
       navigate(detailPath(entityType, saved.id));
     } catch (err) {
-      setSubmitError((err as Error).message);
+      setSubmitError(formatError(err, 'Non è stato possibile salvare le modifiche.'));
     }
   }
 
@@ -811,7 +811,7 @@ function NamedEntityForm<T extends Place | Epoch>({
   );
 }
 
-function EventForm({ mode }: { mode: 'create' | 'edit' }) {
+function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
   const { id } = useParams();
   const eventId = parseRouteId(id);
   const navigate = useNavigate();
@@ -878,7 +878,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit' }) {
       const saved = isEdit && eventId ? await api.updateEvent(eventId, payload) : await api.createEvent(payload);
       navigate(`/events/${saved.id}`);
     } catch (err) {
-      setSubmitError((err as Error).message);
+      setSubmitError(formatError(err, 'Non è stato possibile salvare le modifiche.'));
     }
   }
 
@@ -944,7 +944,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit' }) {
   );
 }
 
-function RarityInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function RarityInput({ value, onChange }: { value: string; onChange: (value: string) => void; }) {
   return (
     <>
       <label className="form-label" htmlFor="rarity">Rarità<RequiredMark /></label>
@@ -954,7 +954,7 @@ function RarityInput({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
-function EntityFormShell({ title, backTo, children }: { title: string; backTo: string; children: ReactNode }) {
+function EntityFormShell({ title, backTo, children }: { title: string; backTo: string; children: ReactNode; }) {
   return (
     <section className="mx-auto form-page">
       <div className="d-flex justify-content-between align-items-center gap-3 mb-4">
@@ -972,7 +972,7 @@ function EntityFormShell({ title, backTo, children }: { title: string; backTo: s
   );
 }
 
-function FormActions({ cancelTo }: { cancelTo: string }) {
+function FormActions({ cancelTo }: { cancelTo: string; }) {
   return (
     <div className="d-flex justify-content-end gap-2 mt-4">
       <Link className="btn btn-outline-secondary" to={cancelTo}>Annulla</Link>
@@ -1009,7 +1009,7 @@ function PersonDetail() {
   const [person, places, events, media] = data;
 
   return (
-    <DetailShell title={person.alias} entityType="person" entityId={person.id} onDelete={remove}>
+    <DetailShell title={person.alias} entityType="person" entityId={person.id} media={media} onMediaChanged={reload} onDelete={remove}>
       <InfoGrid
         items={[
           ['Nome', [person.name, person.surname].filter(Boolean).join(' ') || 'Non indicato'],
@@ -1019,7 +1019,6 @@ function PersonDetail() {
         ]}
       />
       <Description text={person.description} />
-      <MediaSection pullableId={person.id} initialMedia={media} onChanged={reload} />
       <PersonPlacesEditor personId={person.id} initialLinks={places} />
       <LinkedEvents events={events} />
     </DetailShell>
@@ -1046,7 +1045,7 @@ function PlaceDetail() {
       await api.deletePlace(placeId);
       navigate('/places');
     } catch (err) {
-      setDeleteError((err as Error).message);
+      setDeleteError(formatError(err, 'Non è stato possibile eliminare l’elemento.'));
     }
   }
 
@@ -1057,11 +1056,10 @@ function PlaceDetail() {
   const [place, people, events, media] = data;
 
   return (
-    <DetailShell title={place.name} entityType="place" entityId={place.id} onDelete={remove}>
+    <DetailShell title={place.name} entityType="place" entityId={place.id} media={media} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
       <InfoGrid items={[['Rarità', String(place.rarity)], ['Eventi collegati', String(events.length)], ['Persone collegate', String(people.length)]]} />
       <Description text={place.description} />
-      <MediaSection pullableId={place.id} initialMedia={media} onChanged={reload} />
       <LinkedPeople links={people} />
       <EventListSection title="Eventi in questo luogo" events={events} />
     </DetailShell>
@@ -1085,7 +1083,7 @@ function EpochDetail() {
       await api.deleteEpoch(epochId);
       navigate('/epochs');
     } catch (err) {
-      setDeleteError((err as Error).message);
+      setDeleteError(formatError(err, 'Non è stato possibile eliminare l’elemento.'));
     }
   }
 
@@ -1096,11 +1094,10 @@ function EpochDetail() {
   const [epoch, events, media] = data;
 
   return (
-    <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} onDelete={remove}>
+    <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} media={media} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
       <InfoGrid items={[['Rarità', String(epoch.rarity)], ['Eventi collegati', String(events.length)]]} />
       <Description text={epoch.description} />
-      <MediaSection pullableId={epoch.id} initialMedia={media} onChanged={reload} />
       <EventListSection title="Eventi in questa epoca" events={events} />
     </DetailShell>
   );
@@ -1128,7 +1125,7 @@ function EventDetail() {
   const [event, participants, media] = data;
 
   return (
-    <DetailShell title={event.title} entityType="event" entityId={event.id} onDelete={remove}>
+    <DetailShell title={event.title} entityType="event" entityId={event.id} media={media} onMediaChanged={reload} onDelete={remove}>
       <InfoGrid
         items={[
           ['Data', formatDate(event)],
@@ -1142,53 +1139,65 @@ function EventDetail() {
         {event.epoch && <Link className="btn btn-outline-secondary btn-sm" to={`/epochs/${event.epoch.id}`}>Apri epoca</Link>}
       </div>
       <Description text={event.description} />
-      <MediaSection pullableId={event.id} initialMedia={media} onChanged={reload} />
       <EventParticipantsEditor eventId={event.id} initialParticipants={participants} />
     </DetailShell>
   );
 }
 
-function DetailShell({
+export function DetailShell({
   title,
   entityType,
   entityId,
+  media,
+  onMediaChanged,
   onDelete,
   children,
 }: {
   title: string;
   entityType: EntityType;
   entityId: number;
+  media: MediaAsset[];
+  onMediaChanged: () => void;
   onDelete: () => void;
   children: ReactNode;
 }) {
+  const [mediaError, setMediaError] = useState<string | null>(null);
+
   return (
     <section>
-      <div className="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start mb-4">
-        <div>
+      <div className="detail-header mb-4">
+        <div className="detail-heading min-w-0">
           <Link className="text-decoration-none small" to={entityPaths[entityType]}>
             <i className="bi bi-arrow-left me-1" />
             {entityPluralLabels[entityType]}
           </Link>
           <h1 className="h2 mt-2 mb-1">{title}</h1>
-          <p className="text-secondary mb-0">{entityLabels[entityType]} #{entityId}</p>
+          <p className="text-secondary mb-3">{entityLabels[entityType]} #{entityId}</p>
+          <div className="btn-group detail-actions">
+            <Link className="btn btn-outline-primary" to={`${detailPath(entityType, entityId)}/edit`}>
+              <i className="bi bi-pencil me-2" />
+              Modifica
+            </Link>
+            <button className="btn btn-outline-danger" type="button" onClick={onDelete}>
+              <i className="bi bi-trash me-2" />
+              Elimina
+            </button>
+          </div>
         </div>
-        <div className="btn-group">
-          <Link className="btn btn-outline-primary" to={`${detailPath(entityType, entityId)}/edit`}>
-            <i className="bi bi-pencil me-2" />
-            Modifica
-          </Link>
-          <button className="btn btn-outline-danger" type="button" onClick={onDelete}>
-            <i className="bi bi-trash me-2" />
-            Elimina
-          </button>
-        </div>
+        <MediaSection
+          pullableId={entityId}
+          initialMedia={media}
+          onChanged={onMediaChanged}
+          onError={setMediaError}
+        />
       </div>
+      {mediaError && <div className="mb-4"><ErrorAlert message={mediaError} /></div>}
       <div className="detail-stack">{children}</div>
     </section>
   );
 }
 
-function InfoGrid({ items }: { items: Array<[string, string]> }) {
+function InfoGrid({ items }: { items: Array<[string, string]>; }) {
   return (
     <section className="border rounded bg-white p-4">
       <div className="row g-3">
@@ -1203,7 +1212,7 @@ function InfoGrid({ items }: { items: Array<[string, string]> }) {
   );
 }
 
-function Description({ text }: { text?: string | null }) {
+function Description({ text }: { text?: string | null; }) {
   return (
     <section className="border rounded bg-white p-4">
       <h2 className="h5">Descrizione</h2>
@@ -1212,64 +1221,158 @@ function Description({ text }: { text?: string | null }) {
   );
 }
 
-function MediaSection({
+export function MediaSection({
   pullableId,
   initialMedia,
   onChanged,
+  onError,
 }: {
   pullableId: number;
   initialMedia: MediaAsset[];
   onChanged: () => void;
+  onError?: (message: string | null) => void;
 }) {
-  const [file, setFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const displayedIndex = Math.min(activeIndex, Math.max(initialMedia.length - 1, 0));
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!file) return;
+  useEffect(() => {
+    setActiveIndex((current) => Math.min(current, Math.max(initialMedia.length - 1, 0)));
+  }, [initialMedia.length]);
+
+  useEffect(() => {
+    onError?.(error);
+  }, [error, onError]);
+
+  useEffect(() => () => onError?.(null), [onError]);
+
+  async function uploadSelected(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const selectedFile = input.files?.[0];
+    if (!selectedFile || uploading) return;
     setUploading(true);
     setError(null);
     try {
-      await api.uploadMedia(file, pullableId);
-      setFile(null);
-      event.currentTarget.reset();
+      await api.uploadMedia(selectedFile, pullableId);
       onChanged();
     } catch (err) {
-      setError((err as Error).message);
+      setError(formatError(err, 'Non è stato possibile caricare l’immagine.'));
     } finally {
+      input.value = '';
       setUploading(false);
     }
   }
 
+  async function remove(asset: MediaAsset) {
+    if (!window.confirm('Eliminare definitivamente questa immagine?')) return;
+    setDeletingId(asset.id);
+    setError(null);
+    try {
+      await api.deleteMedia(asset.id);
+      onChanged();
+    } catch (err) {
+      setError(formatError(err, 'Non è stato possibile eliminare l’immagine.'));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function showPrevious() {
+    setActiveIndex((current) => (current - 1 + initialMedia.length) % initialMedia.length);
+  }
+
+  function showNext() {
+    setActiveIndex((current) => (current + 1) % initialMedia.length);
+  }
+
   return (
-    <section className="border rounded bg-white p-4">
-      <div className="d-flex flex-column flex-md-row justify-content-between gap-3 mb-3">
-        <div>
-          <h2 className="h5 mb-1">Immagini</h2>
-          <p className="text-secondary mb-0">Allega immagini visibili solo dopo l'accesso.</p>
-        </div>
-        <form className="d-flex gap-2 flex-column flex-sm-row" onSubmit={submit}>
-          <input className="form-control" type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-          <button className="btn btn-outline-primary" type="submit" disabled={!file || uploading}>
-            <i className="bi bi-upload me-2" />
-            Carica
-          </button>
-        </form>
+    <div className="media-gallery">
+      <input
+        className="visually-hidden"
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        aria-label="Seleziona immagine"
+        disabled={uploading}
+        onChange={uploadSelected}
+      />
+      <div className="media-gallery-frame">
+        {initialMedia.length === 0 ? (
+          <div className="media-empty-state d-flex flex-column align-items-center justify-content-center text-secondary" aria-label="Nessuna immagine allegata">
+            <i className="bi bi-image" aria-hidden="true" />
+            <span className="small mt-2">Nessuna immagine</span>
+          </div>
+        ) : (
+          <div className="carousel slide media-carousel h-100" aria-label="Immagini allegate">
+            <div className="carousel-inner h-100">
+              {initialMedia.map((asset, index) => (
+                <div className={`carousel-item h-100${index === displayedIndex ? ' active' : ''}`} key={asset.id}>
+                  <AuthenticatedMedia
+                    asset={asset}
+                    position={index + 1}
+                    total={initialMedia.length}
+                    deleting={deletingId === asset.id}
+                    onDelete={() => remove(asset)}
+                  />
+                </div>
+              ))}
+            </div>
+            {initialMedia.length > 1 && (
+              <>
+                <button className="carousel-control-prev media-carousel-control" type="button" onClick={showPrevious} aria-label="Immagine precedente">
+                  <span className="carousel-control-prev-icon" aria-hidden="true" />
+                </button>
+                <button className="carousel-control-next media-carousel-control" type="button" onClick={showNext} aria-label="Immagine successiva">
+                  <span className="carousel-control-next-icon" aria-hidden="true" />
+                </button>
+                <div className="carousel-indicators media-carousel-indicators">
+                  {initialMedia.map((asset, index) => (
+                    <button
+                      className={index === displayedIndex ? 'active' : ''}
+                      type="button"
+                      onClick={() => setActiveIndex(index)}
+                      aria-current={index === displayedIndex ? 'true' : undefined}
+                      aria-label={`Mostra immagine ${index + 1}`}
+                      key={asset.id}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <button
+          className="btn btn-light media-gallery-action media-gallery-upload"
+          type="button"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          aria-label={uploading ? 'Caricamento immagine' : 'Carica immagine'}
+          title={uploading ? 'Caricamento immagine' : 'Carica immagine'}
+        >
+          {uploading ? <span className="spinner-border spinner-border-sm" aria-hidden="true" /> : <i className="bi bi-upload" aria-hidden="true" />}
+        </button>
       </div>
-      {error && <ErrorAlert message={error} />}
-      {initialMedia.length === 0 ? (
-        <p className="text-secondary mb-0">Nessuna immagine allegata.</p>
-      ) : (
-        <div className="media-grid">
-          {initialMedia.map((asset) => <AuthenticatedMedia asset={asset} key={asset.id} />)}
-        </div>
-      )}
-    </section>
+      {!onError && error && <div className="mt-2"><ErrorAlert message={error} /></div>}
+    </div>
   );
 }
 
-export function AuthenticatedMedia({ asset }: { asset: MediaAsset }) {
+export function AuthenticatedMedia({
+  asset,
+  position = 1,
+  total = 1,
+  deleting = false,
+  onDelete,
+}: {
+  asset: MediaAsset;
+  position?: number;
+  total?: number;
+  deleting?: boolean;
+  onDelete?: () => void;
+}) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
@@ -1296,20 +1399,38 @@ export function AuthenticatedMedia({ asset }: { asset: MediaAsset }) {
     };
   }, [asset.id]);
 
-  if (error) {
-    return <div className="media-thumb d-flex align-items-center justify-content-center text-secondary">Immagine non disponibile</div>;
-  }
-  if (!objectUrl) {
-    return <div className="media-thumb placeholder-glow" aria-label={`Caricamento ${asset.filename}`} />;
-  }
   return (
-    <a href={objectUrl} target="_blank" rel="noreferrer" className="media-thumb">
-      <img src={objectUrl} alt={asset.filename} />
-    </a>
+    <div className="media-slide h-100">
+      <div className="media-carousel-frame d-flex align-items-center justify-content-center h-100">
+        {error && <span className="text-secondary">Immagine non disponibile</span>}
+        {!error && !objectUrl && (
+          <div className="placeholder-glow" aria-label={`Caricamento immagine ${position} di ${total}`}>
+            <span className="placeholder col-8" />
+          </div>
+        )}
+        {objectUrl && <img src={objectUrl} alt={`Immagine ${position} di ${total}`} />}
+      </div>
+      <div className="media-image-actions d-flex gap-2" role="group" aria-label={`Azioni immagine ${position} di ${total}`}>
+        {objectUrl ? (
+          <a className="btn btn-light media-gallery-action" href={objectUrl} target="_blank" rel="noreferrer" aria-label={`Apri immagine ${position} di ${total} a dimensione intera`} title="Apri a dimensione intera">
+            <i className="bi bi-arrows-fullscreen" aria-hidden="true" />
+          </a>
+        ) : (
+          <button className="btn btn-light media-gallery-action" type="button" disabled aria-label="Immagine non ancora disponibile">
+            <i className="bi bi-arrows-fullscreen" aria-hidden="true" />
+          </button>
+        )}
+        {onDelete && (
+          <button className="btn btn-light text-danger media-gallery-action" type="button" onClick={onDelete} disabled={deleting} aria-label={`Elimina immagine ${position} di ${total}`} title="Elimina immagine">
+            {deleting ? <span className="spinner-border spinner-border-sm" aria-hidden="true" /> : <i className="bi bi-trash" aria-hidden="true" />}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
-function PersonPlacesEditor({ personId, initialLinks }: { personId: number; initialLinks: PersonPlace[] }) {
+function PersonPlacesEditor({ personId, initialLinks }: { personId: number; initialLinks: PersonPlace[]; }) {
   const { data: places, loading, error } = useAsync(api.places, []);
   const [rows, setRows] = useState(() => initialLinks.map((link) => ({ place_id: String(link.place_id), motivation: link.motivation ?? '' })));
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1331,7 +1452,7 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
       await api.replacePersonPlaces(personId, rows.filter((row) => row.place_id).map((row) => ({ place_id: Number(row.place_id), motivation: cleanOptional(row.motivation) })));
       setSaved(true);
     } catch (err) {
-      setSaveError((err as Error).message);
+      setSaveError(formatError(err, 'Non è stato possibile salvare i collegamenti.'));
     }
   }
 
@@ -1378,7 +1499,7 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
   );
 }
 
-export function EventParticipantsEditor({ eventId, initialParticipants }: { eventId: number; initialParticipants: EventParticipant[] }) {
+export function EventParticipantsEditor({ eventId, initialParticipants }: { eventId: number; initialParticipants: EventParticipant[]; }) {
   const { data: people, loading, error } = useAsync(api.people, []);
   const [rows, setRows] = useState(() => initialParticipants.map((link) => ({ person_id: String(link.person_id), role: link.role ?? '', motivation: link.motivation ?? '' })));
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1400,7 +1521,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
       await api.replaceEventParticipants(eventId, rows.filter((row) => row.person_id).map((row) => ({ person_id: Number(row.person_id), role: cleanOptional(row.role), motivation: cleanOptional(row.motivation) })));
       setSaved(true);
     } catch (err) {
-      setSaveError((err as Error).message);
+      setSaveError(formatError(err, 'Non è stato possibile salvare i partecipanti.'));
     }
   }
 
@@ -1451,7 +1572,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
   );
 }
 
-export function LinkedEvents({ events }: { events: PersonEvent[] }) {
+export function LinkedEvents({ events }: { events: PersonEvent[]; }) {
   return (
     <section className="border rounded bg-white p-4">
       <h2 className="h5">Eventi collegati</h2>
@@ -1471,7 +1592,7 @@ export function LinkedEvents({ events }: { events: PersonEvent[] }) {
   );
 }
 
-function LinkedPeople({ links }: { links: PlacePerson[] }) {
+function LinkedPeople({ links }: { links: PlacePerson[]; }) {
   return (
     <section className="border rounded bg-white p-4">
       <h2 className="h5">Persone collegate</h2>
@@ -1489,7 +1610,7 @@ function LinkedPeople({ links }: { links: PlacePerson[] }) {
   );
 }
 
-function EventListSection({ title, events }: { title: string; events: Event[] }) {
+function EventListSection({ title, events }: { title: string; events: Event[]; }) {
   return (
     <section className="border rounded bg-white p-4">
       <h2 className="h5">{title}</h2>
@@ -1523,7 +1644,7 @@ function SearchPage() {
     try {
       setResults(await api.search(query.trim()));
     } catch (err) {
-      setError((err as Error).message);
+      setError(formatError(err, 'Non è stato possibile completare la ricerca.'));
     } finally {
       setLoading(false);
     }
@@ -1568,7 +1689,7 @@ function PullsPage() {
       const selected = entityType || undefined;
       setResult(mode === 'daily' ? await api.dailyPull(selected) : await api.randomPull(selected));
     } catch (err) {
-      setError((err as Error).message);
+      setError(formatError(err, 'Non è stato possibile completare l’estrazione.'));
     } finally {
       setLoading(false);
     }

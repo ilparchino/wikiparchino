@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import App, { AuthenticatedMedia, EventParticipantsEditor, LinkedEvents } from './App';
+import App, { AuthenticatedMedia, DetailShell, EventParticipantsEditor, LinkedEvents, MediaSection } from './App';
 import { api } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 import type { EventParticipant, MediaAsset, Person, PersonEvent } from './types';
@@ -97,16 +97,135 @@ describe('App', () => {
       created_at: '2026-07-15T10:00:00Z',
     } as MediaAsset;
     vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
-    const createObjectURL = vi.fn(() => 'blob:authenticated-image');
+    const replacementAsset = { ...asset, id: 10, filename: 'seconda.png' };
+    const createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:authenticated-image')
+      .mockReturnValueOnce('blob:replacement-image');
     const revokeObjectURL = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
 
-    const { unmount } = render(<AuthenticatedMedia asset={asset} />);
+    const { rerender, unmount } = render(<AuthenticatedMedia asset={asset} />);
 
-    await waitFor(() => expect(screen.getByRole('img', { name: 'foto.png' })).toHaveAttribute('src', 'blob:authenticated-image'));
-    unmount();
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:authenticated-image'));
+    rerender(<AuthenticatedMedia asset={replacementAsset} />);
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:replacement-image'));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:authenticated-image');
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:replacement-image');
+  });
+
+  it('uploads immediately from the hidden picker and allows selecting the same file again', async () => {
+    let resolveUpload!: (asset: MediaAsset) => void;
+    const uploaded = new Promise<MediaAsset>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploadMedia = vi
+      .spyOn(api, 'uploadMedia')
+      .mockReturnValueOnce(uploaded)
+      .mockResolvedValueOnce({ id: 12, pullable_id: 1, filename: 'ricordo.png', content_type: 'image/png' } as MediaAsset);
+    const onChanged = vi.fn();
+    render(<MediaSection pullableId={1} initialMedia={[]} onChanged={onChanged} />);
+
+    const input = screen.getByLabelText('Seleziona immagine') as HTMLInputElement;
+    const selectedFile = new File(['image'], 'ricordo.png', { type: 'image/png' });
+    expect(input).toHaveClass('visually-hidden');
+    const uploadButton = screen.getByRole('button', { name: 'Carica immagine' });
+    expect(uploadButton).toHaveClass('media-gallery-action');
+    const openPicker = vi.spyOn(input, 'click');
+    fireEvent.click(uploadButton);
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    fireEvent.change(input, { target: { files: [selectedFile] } });
+    expect(uploadMedia).toHaveBeenCalledWith(selectedFile, 1);
+    expect(screen.getByRole('button', { name: 'Caricamento immagine' })).toBeDisabled();
+
+    resolveUpload({ id: 11, pullable_id: 1, filename: 'ricordo.png', content_type: 'image/png' } as MediaAsset);
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(input).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Carica immagine' })).toBeEnabled();
+
+    fireEvent.change(input, { target: { files: [selectedFile] } });
+    await waitFor(() => expect(uploadMedia).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+  });
+
+  it('renders a controlled carousel and handles confirmed media deletion', async () => {
+    const assets = [
+      { id: 21, pullable_id: 1, filename: 'prima.png', content_type: 'image/png' },
+      { id: 22, pullable_id: 1, filename: 'seconda.png', content_type: 'image/png' },
+    ] as MediaAsset[];
+    vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:first')
+      .mockReturnValueOnce('blob:second');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const deleteMedia = vi.spyOn(api, 'deleteMedia').mockResolvedValue(undefined);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const onChanged = vi.fn();
+    const { rerender } = render(<MediaSection pullableId={1} initialMedia={assets} onChanged={onChanged} />);
+
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 2' })).toBeInTheDocument());
+    expect(screen.getByLabelText('Immagine precedente')).toBeInTheDocument();
+    expect(screen.getByLabelText('Mostra immagine 1')).toHaveClass('active');
+    expect(screen.getByLabelText('Apri immagine 1 di 2 a dimensione intera')).toHaveAttribute('href', 'blob:first');
+    expect(screen.queryByText('prima.png')).not.toBeInTheDocument();
+    expect(screen.queryByText('seconda.png')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Immagine successiva'));
+    expect(screen.getByLabelText('Mostra immagine 2')).toHaveClass('active');
+
+    fireEvent.click(screen.getByLabelText('Elimina immagine 2 di 2'));
+    expect(deleteMedia).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenLastCalledWith('Eliminare definitivamente questa immagine?');
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByLabelText('Elimina immagine 2 di 2'));
+    await waitFor(() => expect(deleteMedia).toHaveBeenCalledWith(22));
+    expect(onChanged).toHaveBeenCalledOnce();
+
+    rerender(<MediaSection pullableId={1} initialMedia={[assets[0]]} onChanged={onChanged} />);
+    await waitFor(() => expect(screen.queryByLabelText('Immagine successiva')).not.toBeInTheDocument());
+    expect(screen.queryByLabelText('Mostra immagine 1')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toBeInTheDocument();
+  });
+
+  it('places the fixed media gallery in the detail header instead of the content stack', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <DetailShell
+          title="Titolo molto lungo che può andare su più righe senza sovrapporsi"
+          entityType="person"
+          entityId={1}
+          media={[]}
+          onMediaChanged={vi.fn()}
+          onDelete={vi.fn()}
+        >
+          <section>Contenuto descrittivo</section>
+        </DetailShell>
+      </MemoryRouter>,
+    );
+
+    const header = container.querySelector('.detail-header');
+    const content = container.querySelector('.detail-stack');
+    expect(header).toContainElement(screen.getByRole('heading'));
+    expect(header?.querySelector('.media-gallery')).not.toBeNull();
+    expect(content?.querySelector('.media-gallery')).toBeNull();
+    expect(screen.getByLabelText('Nessuna immagine allegata')).toBeInTheDocument();
+  });
+
+  it('does not expose unexpected JavaScript upload errors', async () => {
+    vi.spyOn(api, 'uploadMedia').mockRejectedValue(new Error('can\'t access property reset'));
+    render(<MediaSection pullableId={1} initialMedia={[]} onChanged={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Seleziona immagine'), {
+      target: { files: [new File(['image'], 'errore.png', { type: 'image/png' })] },
+    });
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Non è stato possibile caricare l’immagine.'));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('reset');
   });
 
   it('edits free-form participant roles and sends blank roles as null', async () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, resolveApiBase } from './api';
+import { ApiError, api, formatError, resolveApiBase } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 
 describe('api client', () => {
@@ -63,7 +63,7 @@ describe('api client', () => {
       vi.fn(() => Promise.resolve(new Response(JSON.stringify({ detail: 'Session expired' }), { status: 401 }))),
     );
 
-    await expect(api.me()).rejects.toThrow('Session expired');
+    await expect(api.me()).rejects.toThrow('La sessione è scaduta. Accedi di nuovo per continuare.');
     expect(getAccessToken()).toBeNull();
   });
 
@@ -93,6 +93,42 @@ describe('api client', () => {
     expect(blob.type).toBe('image/png');
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
     expect(headers.get('Authorization')).toBe('Bearer media-token');
+  });
+
+  it('deletes protected media with bearer authorization', async () => {
+    setAccessToken('media-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(null, { status: 204 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.deleteMedia(7);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/media/7'), expect.objectContaining({ method: 'DELETE' }));
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer media-token');
+  });
+
+  it.each([
+    [415, 'Il formato del file non è supportato. Seleziona un’immagine valida.'],
+    [422, 'Controlla i dati inseriti: alcuni valori non sono validi.'],
+    [429, 'Sono stati effettuati troppi tentativi. Attendi qualche minuto e riprova.'],
+    [500, 'Il server non riesce a completare la richiesta. Riprova più tardi.'],
+  ])('translates HTTP %s without exposing backend details', async (status, expected) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(JSON.stringify({ detail: 'Raw backend failure' }), { status }))),
+    );
+
+    await expect(api.media(1)).rejects.toThrow(expected);
+  });
+
+  it('translates network and unexpected errors safely', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('NetworkError when attempting to fetch resource'))));
+
+    await expect(api.media(1)).rejects.toThrow('Impossibile contattare il server. Controlla la connessione e riprova.');
+    expect(formatError(new Error('Sensitive JavaScript failure'))).toBe('Si è verificato un errore inatteso. Riprova.');
+    expect(formatError(new ApiError(404, 'Raw backend text', true))).toBe('L’elemento richiesto non è disponibile.');
   });
 
   it('sends entity updates without server-owned metadata', async () => {

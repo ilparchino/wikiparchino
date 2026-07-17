@@ -39,6 +39,46 @@ export const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL);
 type EntityPayload<T> = Omit<T, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>;
 type EventPayload = Omit<EntityPayload<Event>, 'place' | 'epoch'>;
 
+function httpErrorMessage(status: number, authenticated: boolean): string {
+  if (status === 0) return 'Impossibile contattare il server. Controlla la connessione e riprova.';
+  if (status === 400) return 'La richiesta non è valida. Controlla i dati e riprova.';
+  if (status === 401) {
+    return authenticated
+      ? 'La sessione è scaduta. Accedi di nuovo per continuare.'
+      : 'Username o password non corretti.';
+  }
+  if (status === 403) return 'Non hai i permessi necessari per questa operazione.';
+  if (status === 404) return 'L’elemento richiesto non è disponibile.';
+  if (status === 409) return 'L’operazione non può essere completata perché l’elemento è ancora utilizzato.';
+  if (status === 413) return 'Il file selezionato è troppo grande.';
+  if (status === 415) return 'Il formato del file non è supportato. Seleziona un’immagine valida.';
+  if (status === 422) return 'Controlla i dati inseriti: alcuni valori non sono validi.';
+  if (status === 429) return 'Sono stati effettuati troppi tentativi. Attendi qualche minuto e riprova.';
+  if (status >= 500) return 'Il server non riesce a completare la richiesta. Riprova più tardi.';
+  return 'Non è stato possibile completare l’operazione.';
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: unknown;
+  readonly authenticated: boolean;
+
+  constructor(status: number, detail: unknown, authenticated: boolean) {
+    super(httpErrorMessage(status, authenticated));
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+    this.authenticated = authenticated;
+  }
+}
+
+export function formatError(
+  error: unknown,
+  fallback = 'Si è verificato un errore inatteso. Riprova.',
+): string {
+  return error instanceof ApiError ? error.message : fallback;
+}
+
 async function responseFor(
   path: string,
   init: RequestInit = {},
@@ -52,22 +92,27 @@ async function responseFor(
   if (authenticated && token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch (error) {
+    throw new ApiError(0, error, authenticated);
+  }
   if (!response.ok) {
     if (authenticated && response.status === 401) {
       clearAccessToken();
     }
-    let message = `Errore ${response.status}`;
+    let detail: unknown = null;
     try {
       const payload = await response.json();
-      message = payload.detail ?? message;
+      detail = payload.detail ?? null;
     } catch {
-      // Keep the status-based message.
+      // The status is sufficient to produce a safe user-facing message.
     }
-    throw new Error(Array.isArray(message) ? message.map((item) => item.msg).join(', ') : message);
+    throw new ApiError(response.status, detail, authenticated);
   }
   return response;
 }
@@ -156,6 +201,7 @@ export const api = {
 
   media: (pullableId: number) => request<MediaAsset[]>(`/api/media?pullable_id=${pullableId}`),
   mediaBlob: async (id: number) => (await responseFor(`/api/media/${id}`)).blob(),
+  deleteMedia: (id: number) => request<void>(`/api/media/${id}`, { method: 'DELETE' }),
   uploadMedia: (file: File, pullableId: number) => {
     const body = new FormData();
     body.append('file', file);
