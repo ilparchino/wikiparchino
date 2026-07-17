@@ -11,6 +11,7 @@ import type {
   PersonPlace,
   Place,
   PlacePerson,
+  Profile,
   PullResult,
   SearchResult,
   User,
@@ -143,6 +144,15 @@ export const api = {
     }
   },
   me: () => request<User>('/api/me'),
+  profile: () => request<Profile>('/api/profile'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('/api/profile/password', {
+      method: 'PUT',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    }),
 
   people: () => request<Person[]>('/api/people'),
   person: (id: number) => request<Person>(`/api/people/${id}`),
@@ -200,7 +210,15 @@ export const api = {
   epochEvents: (epochId: number) => request<Event[]>(`/api/epochs/${epochId}/events`),
 
   media: (pullableId: number) => request<MediaAsset[]>(`/api/media?pullable_id=${pullableId}`),
-  mediaBlob: async (id: number) => (await responseFor(`/api/media/${id}`)).blob(),
+  mediaPreviews: (pullableIds: number[]) => {
+    const query = new URLSearchParams();
+    pullableIds.forEach((id) => query.append('pullable_id', String(id)));
+    return request<MediaAsset[]>(`/api/media/previews?${query.toString()}`);
+  },
+  mediaBlob: async (id: number, createdAt?: string) => {
+    const version = createdAt ? `?version=${encodeURIComponent(createdAt)}` : '';
+    return (await responseFor(`/api/media/${id}${version}`, { cache: 'no-store' })).blob();
+  },
   deleteMedia: (id: number) => request<void>(`/api/media/${id}`, { method: 'DELETE' }),
   uploadMedia: (file: File, pullableId: number) => {
     const body = new FormData();

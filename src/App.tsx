@@ -9,7 +9,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
-import { api, formatError } from './api';
+import { ApiError, api, formatError } from './api';
 import { getAccessToken, subscribeToSessionLoss } from './auth';
 import type {
   Connotation,
@@ -23,6 +23,7 @@ import type {
   PersonPlace,
   Place,
   PlacePerson,
+  ProfileActivity,
   PullResult,
   SearchResult,
   Sex,
@@ -139,6 +140,22 @@ function useAsync<T>(loader: () => Promise<T>, deps: DependencyList) {
   }, [...deps, version]);
 
   return { data, loading, error, reload: () => setVersion((current) => current + 1) };
+}
+
+async function loadEntityList<T extends { id: number }>(loader: () => Promise<T[]>) {
+  const items = await loader();
+  let previewAssets: MediaAsset[] = [];
+  if (items.length > 0) {
+    try {
+      previewAssets = await api.mediaPreviews(items.map((item) => item.id));
+    } catch {
+      // List content remains usable when optional previews are unavailable.
+    }
+  }
+  return {
+    items,
+    previews: new Map(previewAssets.map((asset) => [asset.pullable_id, asset])),
+  };
 }
 
 function Loading() {
@@ -330,7 +347,14 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
               <NavItem to="/pulls" label="Estrazioni" icon="bi-shuffle" onClick={() => setOpen(false)} />
             </div>
             <div className="d-flex align-items-center gap-2">
-              <span className="navbar-text small">{user.display_name}</span>
+              <NavLink
+                className="nav-link small d-inline-flex align-items-center"
+                to="/profile"
+                onClick={() => setOpen(false)}
+              >
+                <i className="bi bi-person-circle me-1" aria-hidden="true" />
+                {user.display_name}
+              </NavLink>
               <button className="btn btn-outline-secondary btn-sm" type="button" onClick={logout}>
                 <i className="bi bi-box-arrow-right me-1" />
                 Esci
@@ -360,6 +384,7 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
           <Route path="/events/:id/edit" element={<EventForm mode="edit" />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/pulls" element={<PullsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -450,6 +475,179 @@ function Dashboard() {
   );
 }
 
+function formatActivityDate(value: string): string {
+  return new Intl.DateTimeFormat('it-IT', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function ProfilePage() {
+  const { data, loading, error } = useAsync(api.profile, []);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [validated, setValidated] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setValidated(true);
+    setFormError(null);
+    setSuccess(null);
+    if (!event.currentTarget.checkValidity()) return;
+    if (newPassword !== confirmation) {
+      setFormError('La conferma non corrisponde alla nuova password.');
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setFormError('La nuova password deve essere diversa da quella attuale.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmation('');
+      setValidated(false);
+      setSuccess('Password aggiornata. Le altre sessioni sono state disconnesse.');
+    } catch (err) {
+      setFormError(
+        err instanceof ApiError && err.status === 400
+          ? 'La password attuale non è corretta.'
+          : formatError(err, 'Non è stato possibile aggiornare la password.'),
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) return <Loading />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+
+  return (
+    <section>
+      <div className="mb-4">
+        <h1 className="h2 mb-1">Profilo</h1>
+        <p className="text-secondary mb-0">Account, attività recenti e sicurezza.</p>
+      </div>
+      <div className="row g-4">
+        <div className="col-lg-4">
+          <section className="border rounded bg-white p-4 mb-4" aria-labelledby="account-heading">
+            <h2 className="h5" id="account-heading">Account</h2>
+            <dl className="mb-0">
+              <dt className="small text-secondary fw-normal">Nome visualizzato</dt>
+              <dd className="fw-semibold">{data.user.display_name}</dd>
+              <dt className="small text-secondary fw-normal">Username</dt>
+              <dd className="mb-0">@{data.user.username}</dd>
+            </dl>
+          </section>
+          <section className="border rounded bg-white p-4" aria-labelledby="password-heading">
+            <h2 className="h5" id="password-heading">Cambia password</h2>
+            {formError && <ErrorAlert message={formError} />}
+            {success && <div className="alert alert-success" role="status">{success}</div>}
+            <form className={validated ? 'was-validated' : ''} noValidate onSubmit={changePassword}>
+              <div className="mb-3">
+                <label className="form-label" htmlFor="current-password">
+                  Password attuale
+                  <RequiredMark />
+                </label>
+                <input
+                  className="form-control"
+                  id="current-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  maxLength={200}
+                  required
+                />
+              </div>
+              <div className="mb-3">
+                <label className="form-label" htmlFor="new-password">
+                  Nuova password
+                  <RequiredMark />
+                </label>
+                <input
+                  className="form-control"
+                  id="new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  minLength={12}
+                  maxLength={200}
+                  required
+                />
+                <div className="form-text">Almeno 12 caratteri.</div>
+              </div>
+              <div className="mb-4">
+                <label className="form-label" htmlFor="confirm-password">
+                  Conferma nuova password
+                  <RequiredMark />
+                </label>
+                <input
+                  className={`form-control${validated && confirmation !== newPassword ? ' is-invalid' : ''}`}
+                  id="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  minLength={12}
+                  maxLength={200}
+                  required
+                />
+                <div className="invalid-feedback">Le password devono coincidere.</div>
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={submitting}>
+                {submitting ? (
+                  <span className="spinner-border spinner-border-sm me-2" aria-hidden="true" />
+                ) : (
+                  <i className="bi bi-key me-2" aria-hidden="true" />
+                )}
+                Aggiorna password
+              </button>
+            </form>
+          </section>
+        </div>
+        <div className="col-lg-8">
+          <section className="border rounded bg-white p-4" aria-labelledby="activity-heading">
+            <h2 className="h5 mb-3" id="activity-heading">Attività recenti</h2>
+            {data.recent_activity.length === 0 ? (
+              <div className="text-secondary py-3">Nessuna attività recente.</div>
+            ) : (
+              <div className="list-group list-group-flush">
+                {data.recent_activity.map((activity: ProfileActivity, index) => (
+                  <Link
+                    className="list-group-item list-group-item-action px-0 d-flex justify-content-between align-items-start gap-3"
+                    to={detailPath(activity.entity_type, activity.entity_id)}
+                    key={`${activity.entity_type}:${activity.entity_id}:${activity.occurred_at}:${index}`}
+                  >
+                    <span className="min-w-0">
+                      <span className="d-block fw-semibold text-break">{activity.title}</span>
+                      <span className="small text-secondary">
+                        {activity.action === 'created' ? 'Creato' : 'Modificato'} · {entityLabels[activity.entity_type]}
+                      </span>
+                    </span>
+                    <time className="small text-secondary text-nowrap" dateTime={activity.occurred_at}>
+                      {formatActivityDate(activity.occurred_at)}
+                    </time>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MetricCard({ label, value, to, icon }: { label: string; value: number; to: string; icon: string; }) {
   return (
     <div className="col-6 col-xl-3">
@@ -466,10 +664,10 @@ function MetricCard({ label, value, to, icon }: { label: string; value: number; 
 
 function PeopleList() {
   const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(api.people, []);
+  const { data, loading, error } = useAsync(() => loadEntityList(api.people), []);
   const filtered = useMemo(() => {
     const term = filter.toLowerCase();
-    return (data ?? []).filter((person) =>
+    return (data?.items ?? []).filter((person) =>
       [person.alias, person.name, person.surname, person.description].some((value) =>
         (value ?? '').toLowerCase().includes(term),
       ),
@@ -484,11 +682,14 @@ function PeopleList() {
       <div className="row g-3">
         {filtered.map((person) => (
           <div className="col-md-6 col-xl-4" key={person.id}>
-            <Link className="entity-card border rounded bg-white p-3 d-block text-decoration-none h-100" to={`/people/${person.id}`}>
-              <span className="badge text-bg-light mb-2">{connotationLabels[person.connotation]}</span>
-              <h2 className="h5 mb-1">{person.alias}</h2>
-              <p className="text-secondary mb-2">{[person.name, person.surname].filter(Boolean).join(' ') || sexLabels[person.sex]}</p>
-              <p className="small text-secondary mb-0">{person.description || 'Nessuna descrizione.'}</p>
+            <Link className="entity-card border rounded bg-white p-3 d-flex gap-3 text-decoration-none h-100" to={`/people/${person.id}`}>
+              <EntityPreview asset={data?.previews.get(person.id)} label={person.alias} />
+              <span className="min-w-0 flex-grow-1">
+                <span className="badge text-bg-light mb-2">{connotationLabels[person.connotation]}</span>
+                <span className="h5 mb-1 d-block text-break">{person.alias}</span>
+                <span className="text-secondary mb-2 d-block">{[person.name, person.surname].filter(Boolean).join(' ') || sexLabels[person.sex]}</span>
+                <span className="small text-secondary d-block">{person.description || 'Nessuna descrizione.'}</span>
+              </span>
             </Link>
           </div>
         ))}
@@ -499,10 +700,10 @@ function PeopleList() {
 
 function PlacesList() {
   const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(api.places, []);
+  const { data, loading, error } = useAsync(() => loadEntityList(api.places), []);
   const filtered = useMemo(() => {
     const term = filter.toLowerCase();
-    return (data ?? []).filter((place) => [place.name, place.description].some((value) => (value ?? '').toLowerCase().includes(term)));
+    return (data?.items ?? []).filter((place) => [place.name, place.description].some((value) => (value ?? '').toLowerCase().includes(term)));
   }, [data, filter]);
 
   return (
@@ -510,17 +711,17 @@ function PlacesList() {
       {loading && <Loading />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
-      <EntityList items={filtered} entityType="place" titleFor={(place) => place.name} subtitleFor={(place) => place.description} />
+      <EntityList items={filtered} previews={data?.previews} entityType="place" titleFor={(place) => place.name} subtitleFor={(place) => place.description} />
     </ListPage>
   );
 }
 
 function EpochsList() {
   const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(api.epochs, []);
+  const { data, loading, error } = useAsync(() => loadEntityList(api.epochs), []);
   const filtered = useMemo(() => {
     const term = filter.toLowerCase();
-    return (data ?? []).filter((epoch) => [epoch.name, epoch.description].some((value) => (value ?? '').toLowerCase().includes(term)));
+    return (data?.items ?? []).filter((epoch) => [epoch.name, epoch.description].some((value) => (value ?? '').toLowerCase().includes(term)));
   }, [data, filter]);
 
   return (
@@ -528,17 +729,17 @@ function EpochsList() {
       {loading && <Loading />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna epoca trovata.</EmptyState>}
-      <EntityList items={filtered} entityType="epoch" titleFor={(epoch) => epoch.name} subtitleFor={(epoch) => epoch.description} />
+      <EntityList items={filtered} previews={data?.previews} entityType="epoch" titleFor={(epoch) => epoch.name} subtitleFor={(epoch) => epoch.description} />
     </ListPage>
   );
 }
 
 function EventsList() {
   const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(api.events, []);
+  const { data, loading, error } = useAsync(() => loadEntityList(api.events), []);
   const filtered = useMemo(() => {
     const term = filter.toLowerCase();
-    return (data ?? []).filter((event) =>
+    return (data?.items ?? []).filter((event) =>
       [event.title, event.description, event.place?.name, event.epoch?.name].some((value) => (value ?? '').toLowerCase().includes(term)),
     );
   }, [data, filter]);
@@ -551,13 +752,16 @@ function EventsList() {
       <div className="list-group">
         {filtered.map((event) => (
           <Link className="list-group-item list-group-item-action" to={`/events/${event.id}`} key={event.id}>
-            <div className="d-flex flex-column flex-md-row justify-content-between gap-2">
-              <div>
+            <div className="d-flex align-items-start gap-3 p-3">
+              <EntityPreview asset={data?.previews.get(event.id)} label={event.title} />
+              <div className="d-flex flex-column flex-md-row justify-content-between gap-2 min-w-0 flex-grow-1">
+                <div className="min-w-0">
                 <h2 className="h5 mb-1">{event.title}</h2>
                 <p className="mb-1 text-secondary">{event.description || 'Nessuna descrizione.'}</p>
                 <small>{event.place?.name} · {event.epoch?.name}</small>
+                </div>
+                <span className="text-secondary text-nowrap">{formatDate(event)}</span>
               </div>
-              <span className="text-secondary">{formatDate(event)}</span>
             </div>
           </Link>
         ))}
@@ -609,11 +813,13 @@ function ListPage({
 
 function EntityList<T extends { id: number; }>({
   items,
+  previews,
   entityType,
   titleFor,
   subtitleFor,
 }: {
   items: T[];
+  previews?: Map<number, MediaAsset>;
   entityType: EntityType;
   titleFor: (item: T) => string;
   subtitleFor: (item: T) => string | null | undefined;
@@ -622,10 +828,13 @@ function EntityList<T extends { id: number; }>({
     <div className="row g-3">
       {items.map((item) => (
         <div className="col-md-6 col-xl-4" key={item.id}>
-          <Link className="entity-card border rounded bg-white p-3 d-block text-decoration-none h-100" to={detailPath(entityType, item.id)}>
-            <span className="badge text-bg-light mb-2">{entityLabels[entityType]}</span>
-            <h2 className="h5 mb-1">{titleFor(item)}</h2>
-            <p className="small text-secondary mb-0">{subtitleFor(item) || 'Nessuna descrizione.'}</p>
+          <Link className="entity-card border rounded bg-white p-3 d-flex gap-3 text-decoration-none h-100" to={detailPath(entityType, item.id)}>
+            <EntityPreview asset={previews?.get(item.id)} label={titleFor(item)} />
+            <span className="min-w-0 flex-grow-1">
+              <span className="badge text-bg-light mb-2">{entityLabels[entityType]}</span>
+              <span className="h5 mb-1 d-block text-break">{titleFor(item)}</span>
+              <span className="small text-secondary d-block">{subtitleFor(item) || 'Nessuna descrizione.'}</span>
+            </span>
           </Link>
         </div>
       ))}
@@ -1172,7 +1381,7 @@ export function DetailShell({
             {entityPluralLabels[entityType]}
           </Link>
           <h1 className="h2 mt-2 mb-1">{title}</h1>
-          <p className="text-secondary mb-3">{entityLabels[entityType]} #{entityId}</p>
+          <p className="text-secondary mb-3">{entityLabels[entityType]}</p>
           <div className="btn-group detail-actions">
             <Link className="btn btn-outline-primary" to={`${detailPath(entityType, entityId)}/edit`}>
               <i className="bi bi-pencil me-2" />
@@ -1309,7 +1518,7 @@ export function MediaSection({
           <div className="carousel slide media-carousel h-100" aria-label="Immagini allegate">
             <div className="carousel-inner h-100">
               {initialMedia.map((asset, index) => (
-                <div className={`carousel-item h-100${index === displayedIndex ? ' active' : ''}`} key={asset.id}>
+                <div className={`carousel-item h-100${index === displayedIndex ? ' active' : ''}`} key={`${asset.id}:${asset.created_at}`}>
                   <AuthenticatedMedia
                     asset={asset}
                     position={index + 1}
@@ -1336,7 +1545,7 @@ export function MediaSection({
                       onClick={() => setActiveIndex(index)}
                       aria-current={index === displayedIndex ? 'true' : undefined}
                       aria-label={`Mostra immagine ${index + 1}`}
-                      key={asset.id}
+                      key={`${asset.id}:${asset.created_at}`}
                     />
                   ))}
                 </div>
@@ -1360,30 +1569,20 @@ export function MediaSection({
   );
 }
 
-export function AuthenticatedMedia({
-  asset,
-  position = 1,
-  total = 1,
-  deleting = false,
-  onDelete,
-}: {
-  asset: MediaAsset;
-  position?: number;
-  total?: number;
-  deleting?: boolean;
-  onDelete?: () => void;
-}) {
+function useAuthenticatedMediaUrl(asset?: MediaAsset) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const identity = asset ? `${asset.id}:${asset.created_at}` : null;
 
   useEffect(() => {
     let active = true;
     let createdUrl: string | null = null;
     setObjectUrl(null);
     setError(false);
+    if (!asset) return () => undefined;
 
     api
-      .mediaBlob(asset.id)
+      .mediaBlob(asset.id, asset.created_at)
       .then((blob) => {
         if (!active) return;
         createdUrl = URL.createObjectURL(blob);
@@ -1397,7 +1596,40 @@ export function AuthenticatedMedia({
       active = false;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [asset.id]);
+  }, [identity]);
+
+  return { objectUrl, error };
+}
+
+function EntityPreview({ asset, label }: { asset?: MediaAsset; label: string; }) {
+  const { objectUrl, error } = useAuthenticatedMediaUrl(asset);
+  return (
+    <span className="entity-preview d-flex align-items-center justify-content-center">
+      {objectUrl && !error ? (
+        <img src={objectUrl} alt={`Anteprima di ${label}`} />
+      ) : (
+        <span role="img" aria-label="Nessuna immagine">
+          <i className="bi bi-image text-secondary" aria-hidden="true" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function AuthenticatedMedia({
+  asset,
+  position = 1,
+  total = 1,
+  deleting = false,
+  onDelete,
+}: {
+  asset: MediaAsset;
+  position?: number;
+  total?: number;
+  deleting?: boolean;
+  onDelete?: () => void;
+}) {
+  const { objectUrl, error } = useAuthenticatedMediaUrl(asset);
 
   return (
     <div className="media-slide h-100">

@@ -81,18 +81,54 @@ describe('api client', () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it('downloads protected media with bearer authorization', async () => {
+  it('downloads versioned protected media without browser caching', async () => {
     setAccessToken('media-token');
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
       Promise.resolve(new Response('image', { headers: { 'Content-Type': 'image/png' } })),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const blob = await api.mediaBlob(7);
+    const blob = await api.mediaBlob(7, '2026-07-17T10:00:00Z');
 
     expect(blob.type).toBe('image/png');
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/api/media/7?version=2026-07-17T10%3A00%3A00Z',
+    );
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
     expect(headers.get('Authorization')).toBe('Bearer media-token');
+  });
+
+  it('requests preview metadata in one repeated-parameter call', async () => {
+    setAccessToken('preview-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify([]))),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.mediaPreviews([2, 5, 8]);
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/api/media/previews?pullable_id=2&pullable_id=5&pullable_id=8',
+    );
+  });
+
+  it('changes the password without clearing the current token', async () => {
+    setAccessToken('current-session');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(null, { status: 204 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.changePassword('password-attuale', 'password-nuova-sicura');
+
+    expect(getAccessToken()).toBe('current-session');
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(request.method).toBe('PUT');
+    expect(JSON.parse(String(request.body))).toEqual({
+      current_password: 'password-attuale',
+      new_password: 'password-nuova-sicura',
+    });
   });
 
   it('deletes protected media with bearer authorization', async () => {

@@ -88,7 +88,98 @@ describe('App', () => {
     expect(window.location.hash).toBe('#/people');
   });
 
-  it('creates and revokes object URLs for authenticated media', async () => {
+  it('renders the profile activity and changes the password without ending the session', async () => {
+    vi.spyOn(api, 'profile').mockResolvedValue({
+      user,
+      recent_activity: [
+        {
+          entity_type: 'event',
+          entity_id: 7,
+          title: 'Viaggio memorabile',
+          action: 'updated',
+          occurred_at: '2026-07-17T10:00:00Z',
+        },
+      ],
+    });
+    const changePassword = vi.spyOn(api, 'changePassword').mockResolvedValue(undefined);
+    window.location.hash = '#/profile';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Profilo' })).toBeInTheDocument());
+    expect(screen.getByText('@francesco')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Viaggio memorabile/ })).toHaveAttribute('href', '#/events/7');
+    fireEvent.change(screen.getByLabelText(/Password attuale/), { target: { value: 'password-attuale' } });
+    fireEvent.change(screen.getByLabelText(/^Nuova password/), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.change(screen.getByLabelText(/Conferma nuova password/), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna password' }));
+
+    await waitFor(() => expect(changePassword).toHaveBeenCalledWith('password-attuale', 'password-nuova-sicura'));
+    expect(screen.getByRole('status')).toHaveTextContent('Password aggiornata');
+    expect(getAccessToken()).toBe('test-session-token');
+  });
+
+  it('renders fixed authenticated previews on every entity list', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    vi.spyOn(api, 'people').mockResolvedValue([
+      { id: 1, alias: 'Dino', sex: 'male', connotation: 'positive', ...metadata } as Person,
+    ]);
+    vi.spyOn(api, 'places').mockResolvedValue([
+      { id: 2, name: 'Parchino', description: null, ...metadata },
+    ]);
+    vi.spyOn(api, 'epochs').mockResolvedValue([
+      { id: 3, name: 'Post-Covid', description: null, ...metadata },
+    ]);
+    vi.spyOn(api, 'events').mockResolvedValue([
+      { id: 4, title: 'APPoti APPiedi', place_id: 2, epoch_id: 3, ...metadata },
+    ]);
+    vi.spyOn(api, 'mediaPreviews').mockImplementation(async (ids) =>
+      ids.map((id) => ({
+        id: id + 20,
+        pullable_id: id,
+        filename: 'non-visibile.png',
+        content_type: 'image/png',
+        created_at: `2026-07-17T10:00:0${id}Z`,
+      })),
+    );
+    vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['preview'], { type: 'image/png' }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:entity-preview');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    for (const [route, label] of [
+      ['#/people', 'Dino'],
+      ['#/places', 'Parchino'],
+      ['#/epochs', 'Post-Covid'],
+      ['#/events', 'APPoti APPiedi'],
+    ]) {
+      window.location.hash = route;
+      render(<App />);
+      await waitFor(() => expect(screen.getByRole('img', { name: `Anteprima di ${label}` })).toBeInTheDocument());
+      expect(screen.getByRole('img', { name: `Anteprima di ${label}` }).closest('.entity-preview')).toBeInTheDocument();
+      expect(screen.queryByText('non-visibile.png')).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('shows the image placeholder when a listed entity has no media', async () => {
+    vi.spyOn(api, 'people').mockResolvedValue([
+      { id: 1, alias: 'Senza foto', sex: 'unknown', connotation: 'unknown' } as Person,
+    ]);
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    window.location.hash = '#/people';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Nessuna immagine' })).toBeInTheDocument());
+  });
+
+  it('reloads and revokes authenticated media when a reused ID has a new timestamp', async () => {
     const asset = {
       id: 9,
       pullable_id: 1,
@@ -97,7 +188,11 @@ describe('App', () => {
       created_at: '2026-07-15T10:00:00Z',
     } as MediaAsset;
     vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
-    const replacementAsset = { ...asset, id: 10, filename: 'seconda.png' };
+    const replacementAsset = {
+      ...asset,
+      filename: 'seconda.png',
+      created_at: '2026-07-15T11:00:00Z',
+    };
     const createObjectURL = vi
       .fn()
       .mockReturnValueOnce('blob:authenticated-image')
@@ -111,6 +206,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:authenticated-image'));
     rerender(<AuthenticatedMedia asset={replacementAsset} />);
     await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:replacement-image'));
+    expect(api.mediaBlob).toHaveBeenNthCalledWith(1, 9, '2026-07-15T10:00:00Z');
+    expect(api.mediaBlob).toHaveBeenNthCalledWith(2, 9, '2026-07-15T11:00:00Z');
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:authenticated-image');
     unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:replacement-image');
@@ -211,6 +308,9 @@ describe('App', () => {
     const header = container.querySelector('.detail-header');
     const content = container.querySelector('.detail-stack');
     expect(header).toContainElement(screen.getByRole('heading'));
+    expect(screen.getByText('Persona')).toBeInTheDocument();
+    expect(screen.queryByText('Persona #1')).not.toBeInTheDocument();
+    expect(header).not.toHaveTextContent('#1');
     expect(header?.querySelector('.media-gallery')).not.toBeNull();
     expect(content?.querySelector('.media-gallery')).toBeNull();
     expect(screen.getByLabelText('Nessuna immagine allegata')).toBeInTheDocument();

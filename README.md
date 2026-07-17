@@ -7,10 +7,12 @@ The FastAPI backend is maintained as a separate repository and is required for a
 ## Features
 
 - Bearer-authenticated login for fixed accounts with tab-scoped session persistence.
+- User profile with recent activity and password changing.
 - Dashboard with content totals and a daily item.
 - Routed list, detail, create, and edit views for every entity type.
+- Content-focused detail headers that keep internal numeric identifiers out of page text.
 - Relationship editing from entity detail pages.
-- Authenticated image upload and display.
+- Authenticated image upload, display, deletion, and fixed list previews.
 - Cross-entity search.
 - Weighted random lottery and item-of-the-day activity.
 - Seasonal designer branding selected from the current date.

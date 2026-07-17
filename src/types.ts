@@ -16,6 +16,19 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface ProfileActivity {
+  entity_type: EntityType;
+  entity_id: number;
+  title: string;
+  action: 'created' | 'updated';
+  occurred_at: string;
+}
+
+export interface Profile {
+  user: User;
+  recent_activity: ProfileActivity[];
+}
+
 export interface Editable {
   id: number;
   rarity: number;
