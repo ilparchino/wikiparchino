@@ -1,4 +1,11 @@
 import type {
+  AdminActivityPage,
+  AdminActivitySource,
+  AdminSummary,
+  AdminUser,
+  AdminUserCreate,
+  AdminUserDetail,
+  AdminUserUpdate,
   EntityType,
   Epoch,
   Event,
@@ -153,6 +160,37 @@ export const api = {
         new_password: newPassword,
       }),
     }),
+
+  adminSummary: () => request<AdminSummary>('/api/admin/summary'),
+  adminUsers: () => request<AdminUser[]>('/api/admin/users'),
+  adminUser: (id: number) => request<AdminUserDetail>(`/api/admin/users/${id}`),
+  createAdminUser: (payload: AdminUserCreate) =>
+    request<AdminUser>('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAdminUser: (id: number, payload: AdminUserUpdate) =>
+    request<AdminUser>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  resetAdminUserPassword: (id: number, newPassword: string) =>
+    request<void>(`/api/admin/users/${id}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
+  revokeAdminUserSessions: (id: number) =>
+    request<{ revoked_count: number }>(`/api/admin/users/${id}/sessions/revoke`, { method: 'POST' }),
+  adminActivity: (params: {
+    page?: number;
+    pageSize?: number;
+    actorUserId?: number;
+    source?: AdminActivitySource;
+    action?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.pageSize) query.set('page_size', String(params.pageSize));
+    if (params.actorUserId) query.set('actor_user_id', String(params.actorUserId));
+    if (params.source) query.set('source', params.source);
+    if (params.action) query.set('action', params.action);
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    return request<AdminActivityPage>(`/api/admin/activity${suffix}`);
+  },
 
   people: () => request<Person[]>('/api/people'),
   person: (id: number) => request<Person>(`/api/people/${id}`),

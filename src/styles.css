@@ -209,6 +209,28 @@ body {
   background: #f8fbff;
 }
 
+.admin-nav-button {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.admin-nav-button.active {
+  color: var(--bs-primary);
+  border-color: var(--bs-primary);
+}
+
+.admin-form-page {
+  max-width: 920px;
+}
+
+.admin-metric {
+  min-width: 128px;
+}
+
 @media (max-width: 991.98px) {
   .detail-header {
     grid-template-columns: minmax(0, 1fr);

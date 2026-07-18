@@ -29,6 +29,68 @@ export interface Profile {
   recent_activity: ProfileActivity[];
 }
 
+export interface AdminUser extends User {
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  active_session_count: number;
+}
+
+export type AdminActivitySource = 'content' | 'account' | 'authentication';
+
+export interface AdminActivity {
+  source: AdminActivitySource;
+  action: string;
+  occurred_at: string;
+  actor: User | null;
+  target: User | null;
+  entity_type: EntityType | null;
+  entity_id: number | null;
+  title: string | null;
+  linkable: boolean;
+  source_ip: string | null;
+}
+
+export interface AdminActivityPage {
+  items: AdminActivity[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AdminUserDetail {
+  user: AdminUser;
+  content_activity: AdminActivity[];
+  account_activity: AdminActivity[];
+}
+
+export interface AdminSummary {
+  total_users: number;
+  active_users: number;
+  inactive_users: number;
+  admin_users: number;
+  active_sessions: number;
+  people: number;
+  places: number;
+  epochs: number;
+  events: number;
+  media: number;
+  activity_last_24h: number;
+}
+
+export interface AdminUserCreate {
+  username: string;
+  display_name: string;
+  password: string;
+  is_admin: boolean;
+}
+
+export interface AdminUserUpdate {
+  display_name: string;
+  is_admin: boolean;
+  is_active: boolean;
+}
+
 export interface Editable {
   id: number;
   rarity: number;

@@ -53,6 +53,117 @@ describe('App', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Wiki Parchino')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('Elemento demo')).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'Amministrazione' })).toHaveAttribute('href', '#/admin');
+  });
+
+  it('hides administration and blocks its route for regular users', async () => {
+    const regular = { ...user, is_admin: false };
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/me')) return json(regular);
+      return json({});
+    }));
+    window.location.hash = '#/admin';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Accesso negato' })).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: 'Amministrazione' })).not.toBeInTheDocument();
+  });
+
+  it('renders administrator metrics, users, and recent activity', async () => {
+    vi.spyOn(api, 'adminSummary').mockResolvedValue({
+      total_users: 2, active_users: 1, inactive_users: 1, admin_users: 1,
+      active_sessions: 3, people: 3, places: 2, epochs: 1, events: 1, media: 4,
+      activity_last_24h: 6,
+    });
+    vi.spyOn(api, 'adminUsers').mockResolvedValue([{
+      ...user, is_active: true, created_at: '2026-07-01T10:00:00Z',
+      updated_at: '2026-07-01T10:00:00Z', active_session_count: 2,
+    }]);
+    vi.spyOn(api, 'adminActivity').mockResolvedValue({
+      items: [{
+        source: 'authentication', action: 'login_succeeded', occurred_at: '2026-07-18T10:00:00Z',
+        actor: user, target: user, entity_type: null, entity_id: null, title: 'Francesco',
+        linkable: false, source_ip: '127.0.0.1',
+      }], total: 1, page: 1, page_size: 10,
+    });
+    window.location.hash = '#/admin';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Amministrazione' })).toBeInTheDocument());
+    expect(screen.getByText('Utenti attivi')).toBeInTheDocument();
+    expect(screen.getByText('@francesco')).toBeInTheDocument();
+    expect(screen.getByText(/Accesso riuscito/)).toBeInTheDocument();
+  });
+
+  it('creates users only after matching password confirmation', async () => {
+    const createUser = vi.spyOn(api, 'createAdminUser').mockResolvedValue({
+      id: 9, username: 'nuovo', display_name: 'Nuovo Utente', is_admin: false,
+      is_active: true, created_at: '2026-07-18T10:00:00Z', updated_at: '2026-07-18T10:00:00Z',
+      active_session_count: 0,
+    });
+    window.location.hash = '#/admin/users/new';
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Nuovo utente' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Username *'), { target: { value: 'nuovo' } });
+    fireEvent.change(screen.getByLabelText('Nome visualizzato *'), { target: { value: 'Nuovo Utente' } });
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'password-sicura' } });
+    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password-diversa' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('conferma');
+    expect(createUser).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password-sicura' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
+    await waitFor(() => expect(createUser).toHaveBeenCalledWith({
+      username: 'nuovo', display_name: 'Nuovo Utente', password: 'password-sicura', is_admin: false,
+    }));
+  });
+
+  it('confirms deactivation and sends the preserved account fields', async () => {
+    const managed = {
+      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false,
+      is_active: true, created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T10:00:00Z',
+      active_session_count: 1,
+    };
+    vi.spyOn(api, 'adminUser').mockResolvedValue({ user: managed, content_activity: [], account_activity: [] });
+    const update = vi.spyOn(api, 'updateAdminUser').mockResolvedValue({ ...managed, is_active: false });
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    window.location.hash = '#/admin/users/8';
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Disattiva' }));
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Disattiva' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(8, {
+      display_name: 'Utente Gestito', is_admin: false, is_active: false,
+    }));
+  });
+
+  it('resets a managed user password and revokes their sessions', async () => {
+    const managed = {
+      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false,
+      is_active: true, created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T10:00:00Z',
+      active_session_count: 2,
+    };
+    vi.spyOn(api, 'adminUser').mockResolvedValue({ user: managed, content_activity: [], account_activity: [] });
+    const resetPassword = vi.spyOn(api, 'resetAdminUserPassword').mockResolvedValue(undefined);
+    const revokeSessions = vi.spyOn(api, 'revokeAdminUserSessions').mockResolvedValue({ revoked_count: 2 });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    window.location.hash = '#/admin/users/8';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Nuova password'), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.change(screen.getByLabelText('Conferma password'), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reimposta password' }));
+    await waitFor(() => expect(resetPassword).toHaveBeenCalledWith(8, 'password-nuova-sicura'));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Revoca sessioni' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Revoca sessioni' }));
+    await waitFor(() => expect(revokeSessions).toHaveBeenCalledWith(8));
+    expect(window.confirm).toHaveBeenCalledWith('Revocare le sessioni di @gestito?');
   });
 
   it('renders login without a token and stores the token after authentication', async () => {

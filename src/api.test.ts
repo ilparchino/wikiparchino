@@ -131,6 +131,57 @@ describe('api client', () => {
     });
   });
 
+  it('builds administrator requests and retains the token after a forbidden response', async () => {
+    setAccessToken('admin-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ detail: 'Forbidden' }), { status: 403 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.adminActivity({
+      page: 2,
+      pageSize: 25,
+      actorUserId: 7,
+      source: 'authentication',
+      action: 'login_failed',
+    })).rejects.toThrow('Non hai i permessi necessari per questa operazione.');
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/api/admin/activity?');
+    expect(url).toContain('page=2');
+    expect(url).toContain('page_size=25');
+    expect(url).toContain('actor_user_id=7');
+    expect(url).toContain('source=authentication');
+    expect(url).toContain('action=login_failed');
+    expect(getAccessToken()).toBe('admin-token');
+  });
+
+  it('sends administrator account mutations without exposing metadata', async () => {
+    setAccessToken('admin-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ revoked_count: 2 }))),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.updateAdminUser(4, { display_name: 'Nome', is_admin: false, is_active: false });
+    await api.resetAdminUserPassword(4, 'password-nuova-sicura');
+    await api.revokeAdminUserSessions(4);
+
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('/api/admin/users/4'),
+      expect.stringContaining('/api/admin/users/4/password'),
+      expect.stringContaining('/api/admin/users/4/sessions/revoke'),
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      display_name: 'Nome',
+      is_admin: false,
+      is_active: false,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      new_password: 'password-nuova-sicura',
+    });
+  });
+
   it('deletes protected media with bearer authorization', async () => {
     setAccessToken('media-token');
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>

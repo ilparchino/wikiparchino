@@ -8,6 +8,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 
 - Bearer-authenticated login for fixed accounts with tab-scoped session persistence.
 - User profile with recent activity and password changing.
+- Administrator-only dashboard for system metrics, account management, session revocation, and filtered activity history.
 - Dashboard with content totals and a daily item.
 - Routed list, detail, create, and edit views for every entity type.
 - Content-focused detail headers that keep internal numeric identifiers out of page text.
@@ -36,6 +37,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 |-- src/
 |   |-- test/            Shared test setup
 |   |-- App.tsx          Routes and application views
+|   |-- AdminPages.tsx   Administrator dashboard and account views
 |   |-- api.ts           Typed backend client
 |   |-- main.tsx         React entry point
 |   |-- styles.css       Project-specific Bootstrap overrides
@@ -122,7 +124,7 @@ With both application servers running, an optional semantic smoke test is:
 lightpanda fetch http://127.0.0.1:5173 --dump semantic_tree_text --wait-ms 1000
 ```
 
-Manual acceptance should cover login, navigation, each entity list/detail/form, relationships, image upload, search, random pulls, daily pulls, and the collapsed mobile navbar.
+Manual acceptance should cover login, navigation, each entity list/detail/form, relationships, image upload, search, random pulls, daily pulls, the collapsed mobile navbar, and administrator/non-administrator access to `/admin`.
 
 ## Deployment Notes
 

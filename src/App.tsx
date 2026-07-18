@@ -10,6 +10,7 @@ import {
   useParams,
 } from 'react-router-dom';
 import { ApiError, api, formatError } from './api';
+import { AdminActivityPage, AdminDashboard, AdminUserCreatePage, AdminUserPage } from './AdminPages';
 import { getAccessToken, subscribeToSessionLoss } from './auth';
 import type {
   Connotation,
@@ -223,7 +224,7 @@ function AppRoot() {
     return <LoginPage onLogin={setUser} />;
   }
 
-  return <AuthenticatedApp user={user} onLogout={() => setUser(null)} />;
+  return <AuthenticatedApp user={user} onUserChange={setUser} onLogout={() => setUser(null)} />;
 }
 
 function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
@@ -307,7 +308,15 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
   );
 }
 
-function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void; }) {
+function AuthenticatedApp({
+  user,
+  onUserChange,
+  onLogout,
+}: {
+  user: User;
+  onUserChange: (user: User) => void;
+  onLogout: () => void;
+}) {
   const [open, setOpen] = useState(false);
 
   async function logout() {
@@ -347,6 +356,17 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
               <NavItem to="/pulls" label="Estrazioni" icon="bi-shuffle" onClick={() => setOpen(false)} />
             </div>
             <div className="d-flex align-items-center gap-2">
+              {user.is_admin && (
+                <NavLink
+                  className="btn btn-outline-secondary btn-sm admin-nav-button"
+                  to="/admin"
+                  title="Amministrazione"
+                  aria-label="Amministrazione"
+                  onClick={() => setOpen(false)}
+                >
+                  <i className="bi bi-shield-lock" aria-hidden="true" />
+                </NavLink>
+              )}
               <NavLink
                 className="nav-link small d-inline-flex align-items-center"
                 to="/profile"
@@ -385,10 +405,30 @@ function AuthenticatedApp({ user, onLogout }: { user: User; onLogout: () => void
           <Route path="/search" element={<SearchPage />} />
           <Route path="/pulls" element={<PullsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/admin" element={<AdminGuard user={user}><AdminDashboard /></AdminGuard>} />
+          <Route path="/admin/users/new" element={<AdminGuard user={user}><AdminUserCreatePage /></AdminGuard>} />
+          <Route
+            path="/admin/users/:id"
+            element={<AdminGuard user={user}><AdminUserPage currentUser={user} onCurrentUserChange={onUserChange} /></AdminGuard>}
+          />
+          <Route path="/admin/activity" element={<AdminGuard user={user}><AdminActivityPage /></AdminGuard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </>
+  );
+}
+
+function AdminGuard({ user, children }: { user: User; children: ReactNode; }) {
+  if (user.is_admin) return children;
+  return (
+    <section className="py-4">
+      <div className="alert alert-danger" role="alert">
+        <h1 className="h4">Accesso negato</h1>
+        <p className="mb-3">Questa sezione è riservata agli amministratori.</p>
+        <Link className="btn btn-outline-danger" to="/">Torna alla bacheca</Link>
+      </div>
+    </section>
   );
 }
 
