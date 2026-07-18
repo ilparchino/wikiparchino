@@ -150,7 +150,7 @@ export function AdminDashboard() {
       <div className="row g-3 mb-4">
         {metrics.map(([label, value, icon]) => (
           <div className="col-6 col-md-4 col-xl" key={label}>
-            <div className="border rounded bg-white p-3 h-100 admin-metric">
+            <div className="border rounded bg-body p-3 h-100 admin-metric">
               <div className="d-flex justify-content-between gap-2 text-secondary small"><span>{label}</span><i className={`bi ${icon}`} /></div>
               <strong className="h3 mb-0 d-block mt-1">{value}</strong>
             </div>
@@ -159,7 +159,7 @@ export function AdminDashboard() {
       </div>
       <div className="row g-4">
         <div className="col-xl-7">
-          <section className="border rounded bg-white p-3 p-md-4">
+          <section className="border rounded bg-body p-3 p-md-4">
             <h2 className="h5 mb-3">Utenti</h2>
             <div className="table-responsive">
               <table className="table align-middle mb-0">
@@ -170,7 +170,7 @@ export function AdminDashboard() {
           </section>
         </div>
         <div className="col-xl-5">
-          <section className="border rounded bg-white p-3 p-md-4">
+          <section className="border rounded bg-body p-3 p-md-4">
             <div className="d-flex justify-content-between align-items-center mb-2"><h2 className="h5 mb-0">Attività recente</h2><Link className="small" to="/admin/activity">Vedi tutte</Link></div>
             <ActivityList items={activity.items} />
           </section>
@@ -232,7 +232,7 @@ export function AdminUserCreatePage() {
     <section className="admin-form-page">
       <AdminBackLink />
       <h1 className="h2 mt-2 mb-4">Nuovo utente</h1>
-      <form className={`border rounded bg-white p-4${validated ? ' was-validated' : ''}`} noValidate onSubmit={submit}>
+      <form className={`border rounded bg-body p-4${validated ? ' was-validated' : ''}`} noValidate onSubmit={submit}>
         {error && <ErrorAlert message={error} />}
         <div className="row g-3">
           <div className="col-md-6"><label className="form-label" htmlFor="admin-new-username">Username *</label><input className="form-control" id="admin-new-username" value={username} onChange={(event) => setUsername(event.target.value)} maxLength={80} required /></div>
@@ -371,8 +371,8 @@ export function AdminUserPage({
         <div className="col-lg-6"><SecurityEditor target={target} isSelf={isSelf} busy={busy} newPassword={newPassword} confirmation={confirmation} onNewPassword={setNewPassword} onConfirmation={setConfirmation} onReset={resetPassword} onRevoke={revokeSessions} /></div>
       </div>
       <div className="row g-4">
-        <div className="col-lg-6"><section className="border rounded bg-white p-4"><h2 className="h5">Attività sui contenuti</h2><ActivityList items={state.data.content_activity} /></section></div>
-        <div className="col-lg-6"><section className="border rounded bg-white p-4"><h2 className="h5">Account e accessi</h2><ActivityList items={state.data.account_activity} /></section></div>
+        <div className="col-lg-6"><section className="border rounded bg-body p-4"><h2 className="h5">Attività sui contenuti</h2><ActivityList items={state.data.content_activity} /></section></div>
+        <div className="col-lg-6"><section className="border rounded bg-body p-4"><h2 className="h5">Account e accessi</h2><ActivityList items={state.data.account_activity} /></section></div>
       </div>
     </section>
   );
@@ -384,7 +384,7 @@ function AccountEditor({ target, isSelf, displayName, isAdmin, busy, onDisplayNa
   onSubmit: (event: FormEvent<HTMLFormElement>) => void; onToggleStatus: () => void;
 }) {
   return (
-    <section className="border rounded bg-white p-4 h-100">
+    <section className="border rounded bg-body p-4 h-100">
       <h2 className="h5 mb-3">Account</h2>
       <form onSubmit={onSubmit}>
         <label className="form-label" htmlFor="admin-display-name">Nome visualizzato</label>
@@ -402,7 +402,7 @@ function SecurityEditor({ target, isSelf, busy, newPassword, confirmation, onNew
   onReset: (event: FormEvent<HTMLFormElement>) => void; onRevoke: () => void;
 }) {
   return (
-    <section className="border rounded bg-white p-4 h-100">
+    <section className="border rounded bg-body p-4 h-100">
       <h2 className="h5 mb-3">Sicurezza</h2>
       <dl className="row small"><dt className="col-8 fw-normal text-secondary">Sessioni attive</dt><dd className="col-4 text-end fw-semibold">{target.active_session_count}</dd></dl>
       <button className="btn btn-outline-secondary mb-4" type="button" disabled={busy || target.active_session_count === 0} onClick={onRevoke}><i className="bi bi-key me-2" />Revoca sessioni</button>
@@ -439,7 +439,7 @@ export function AdminActivityPage() {
     <section>
       <AdminBackLink />
       <h1 className="h2 mt-2 mb-4">Attività del sistema</h1>
-      <div className="border rounded bg-white p-3 mb-4"><div className="row g-3">
+      <div className="border rounded bg-body p-3 mb-4"><div className="row g-3">
         <div className="col-md-4"><label className="form-label" htmlFor="activity-user">Utente</label><select className="form-select" id="activity-user" value={actor} onChange={(event) => { setActor(event.target.value); setPage(1); }}><option value="">Tutti</option>{users.data?.map((user) => <option value={user.id} key={user.id}>{user.display_name}</option>)}</select></div>
         <div className="col-md-4"><label className="form-label" htmlFor="activity-source">Origine</label><select className="form-select" id="activity-source" value={source} onChange={(event) => { setSource(event.target.value as AdminActivitySource | ''); setPage(1); }}><option value="">Tutte</option><option value="content">Contenuti</option><option value="account">Account</option><option value="authentication">Accessi</option></select></div>
         <div className="col-md-4"><label className="form-label" htmlFor="activity-action">Azione</label><select className="form-select" id="activity-action" value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}><option value="">Tutte</option>{Object.entries(actionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
@@ -447,7 +447,7 @@ export function AdminActivityPage() {
       {activity.loading && <Loading />}
       {activity.error && <ErrorAlert message={activity.error} />}
       {activity.data && (
-        <section className="border rounded bg-white p-3 p-md-4">
+        <section className="border rounded bg-body p-3 p-md-4">
           <ActivityList items={activity.data.items} />
           <nav className="d-flex justify-content-between align-items-center pt-3 border-top" aria-label="Paginazione attività">
             <button className="btn btn-outline-secondary btn-sm" type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Precedente</button>

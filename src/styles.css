@@ -2,9 +2,13 @@
   color-scheme: light;
 }
 
+[data-bs-theme="dark"] {
+  color-scheme: dark;
+}
+
 body {
   min-width: 320px;
-  background: #f6f7f9;
+  background: var(--bs-tertiary-bg);
 }
 
 .app-container {
@@ -14,11 +18,34 @@ body {
 
 .login-page {
   min-height: 100vh;
-  background: #f2f5f1;
+  background: var(--bs-tertiary-bg);
 }
 
 .login-card {
   border-radius: 8px;
+}
+
+.login-theme-toggle {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--bs-body-color);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+.login-theme-toggle:hover {
+  color: var(--bs-emphasis-color);
+  background: var(--bs-secondary-bg);
 }
 
 .login-brand-panel {
@@ -46,6 +73,22 @@ body {
   background: #e8eef7;
 }
 
+[data-bs-theme="dark"] .season-spring .login-brand-panel {
+  background: #183329;
+}
+
+[data-bs-theme="dark"] .season-summer .login-brand-panel {
+  background: #3b3219;
+}
+
+[data-bs-theme="dark"] .season-autumn .login-brand-panel {
+  background: #3b2923;
+}
+
+[data-bs-theme="dark"] .season-winter .login-brand-panel {
+  background: #202d3d;
+}
+
 .metric-card,
 .entity-card {
   color: inherit;
@@ -66,7 +109,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--bs-border-color);
   border-radius: 6px;
-  background: #f1f3f5;
+  background: var(--bs-tertiary-bg);
 }
 
 .entity-preview img {
@@ -121,7 +164,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--bs-border-color);
   border-radius: 8px;
-  background: #f1f3f5;
+  background: var(--bs-tertiary-bg);
 }
 
 .media-empty-state {
@@ -158,8 +201,10 @@ body {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-color: rgb(0 0 0 / 12%);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+  color: var(--bs-body-color);
+  background: var(--bs-body-bg);
+  border-color: var(--bs-border-color);
+  box-shadow: var(--bs-box-shadow-sm);
 }
 
 .media-gallery-upload {
@@ -206,21 +251,25 @@ body {
 }
 
 .pull-result {
-  background: #f8fbff;
+  background: var(--bs-info-bg-subtle);
 }
 
-.admin-nav-button {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
+.account-dropdown .dropdown-menu {
+  top: 100%;
+  right: 0;
+  left: auto;
+  width: 230px;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  margin-top: var(--bs-dropdown-spacer);
 }
 
-.admin-nav-button.active {
-  color: var(--bs-primary);
-  border-color: var(--bs-primary);
+.account-menu-toggle {
+  max-width: min(260px, 70vw);
+}
+
+.account-menu-toggle .text-truncate {
+  max-width: 190px;
 }
 
 .admin-form-page {
@@ -232,6 +281,30 @@ body {
 }
 
 @media (max-width: 991.98px) {
+  .account-nav,
+  .account-dropdown {
+    width: 100%;
+  }
+
+  .account-menu-toggle {
+    width: 100%;
+    max-width: none;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
+
+  .account-menu-toggle .text-truncate {
+    max-width: none;
+    margin-right: auto;
+  }
+
+  .account-dropdown .dropdown-menu {
+    position: static;
+    width: 100%;
+    max-width: none;
+    margin-top: 6px;
+  }
+
   .detail-header {
     grid-template-columns: minmax(0, 1fr);
     gap: 24px;

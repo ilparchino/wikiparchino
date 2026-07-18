@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#1f7a4d" />
+    <script>
+      (() => {
+        const key = 'wiki-parchino-color-mode';
+        let stored = null;
+        try {
+          stored = localStorage.getItem(key);
+        } catch {
+          // Storage can be unavailable in privacy-restricted contexts.
+        }
+        const mode = stored === 'light' || stored === 'dark'
+          ? stored
+          : (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-bs-theme', mode);
+        document.querySelector('meta[name="theme-color"]').setAttribute(
+          'content',
+          mode === 'dark' ? '#15191d' : '#1f7a4d',
+        );
+      })();
+    </script>
     <meta name="application-name" content="Wiki Parchino" />
     <meta name="apple-mobile-web-app-title" content="Wiki Parchino" />
     <meta name="description" content="Un'estesa wiki della lore del Parchino." />

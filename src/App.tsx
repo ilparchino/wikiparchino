@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DependencyList, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DependencyList, type FormEvent, type ReactNode } from 'react';
 import {
   HashRouter,
   Link,
@@ -12,6 +12,14 @@ import {
 import { ApiError, api, formatError } from './api';
 import { AdminActivityPage, AdminDashboard, AdminUserCreatePage, AdminUserPage } from './AdminPages';
 import { getAccessToken, subscribeToSessionLoss } from './auth';
+import {
+  applyColorMode,
+  getPreferredColorMode,
+  getStoredColorMode,
+  storeColorMode,
+  subscribeToSystemColorMode,
+  type ColorMode,
+} from './theme';
 import type {
   Connotation,
   EntityType,
@@ -177,7 +185,7 @@ function ErrorAlert({ message }: { message: string; }) {
 }
 
 function EmptyState({ children }: { children: string; }) {
-  return <div className="border rounded p-4 text-center text-secondary bg-white">{children}</div>;
+  return <div className="border rounded p-4 text-center text-secondary bg-body">{children}</div>;
 }
 
 function RequiredMark() {
@@ -185,14 +193,43 @@ function RequiredMark() {
 }
 
 function App() {
+  const { colorMode, toggleColorMode } = useColorMode();
   return (
     <HashRouter>
-      <AppRoot />
+      <AppRoot colorMode={colorMode} onToggleColorMode={toggleColorMode} />
     </HashRouter>
   );
 }
 
-function AppRoot() {
+function useColorMode() {
+  const [colorMode, setColorMode] = useState<ColorMode>(() => getPreferredColorMode());
+
+  useEffect(() => {
+    applyColorMode(colorMode);
+  }, [colorMode]);
+
+  useEffect(() => subscribeToSystemColorMode((systemMode) => {
+    if (getStoredColorMode() === null) setColorMode(systemMode);
+  }), []);
+
+  const toggleColorMode = useCallback(() => {
+    setColorMode((current) => {
+      const next = current === 'dark' ? 'light' : 'dark';
+      storeColorMode(next);
+      return next;
+    });
+  }, []);
+
+  return { colorMode, toggleColorMode };
+}
+
+function AppRoot({
+  colorMode,
+  onToggleColorMode,
+}: {
+  colorMode: ColorMode;
+  onToggleColorMode: () => void;
+}) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -221,13 +258,29 @@ function AppRoot() {
   }
 
   if (!user) {
-    return <LoginPage onLogin={setUser} />;
+    return <LoginPage colorMode={colorMode} onToggleColorMode={onToggleColorMode} onLogin={setUser} />;
   }
 
-  return <AuthenticatedApp user={user} onUserChange={setUser} onLogout={() => setUser(null)} />;
+  return (
+    <AuthenticatedApp
+      colorMode={colorMode}
+      user={user}
+      onToggleColorMode={onToggleColorMode}
+      onUserChange={setUser}
+      onLogout={() => setUser(null)}
+    />
+  );
 }
 
-function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
+function LoginPage({
+  colorMode,
+  onToggleColorMode,
+  onLogin,
+}: {
+  colorMode: ColorMode;
+  onToggleColorMode: () => void;
+  onLogin: (user: User) => void;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -253,7 +306,12 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
       <div className="container">
         <div className="row min-vh-100 align-items-center justify-content-center">
           <div className="col-12 col-lg-9 col-xl-8">
-            <div className="card login-card shadow-lg border-0 overflow-hidden">
+            <div className="card login-card shadow-lg border-0 overflow-hidden position-relative">
+              <ThemeToggleButton
+                className="login-theme-toggle"
+                colorMode={colorMode}
+                onToggle={onToggleColorMode}
+              />
               <div className="row g-0 align-items-stretch">
                 <div className="col-md-6 login-brand-panel d-flex align-items-center justify-content-center p-4">
                   <img className="login-logo img-fluid" src={seasonData.logo} alt="Wiki Parchino" />
@@ -309,17 +367,47 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void; }) {
 }
 
 function AuthenticatedApp({
+  colorMode,
   user,
+  onToggleColorMode,
   onUserChange,
   onLogout,
 }: {
+  colorMode: ColorMode;
   user: User;
+  onToggleColorMode: () => void;
   onUserChange: (user: User) => void;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    function closeOutside(event: MouseEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      setAccountMenuOpen(false);
+      accountMenuRef.current?.querySelector<HTMLButtonElement>('.account-menu-toggle')?.focus();
+    }
+    document.addEventListener('mousedown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenuOpen]);
+
+  function closeNavigation() {
+    setOpen(false);
+    setAccountMenuOpen(false);
+  }
 
   async function logout() {
+    closeNavigation();
     try {
       await api.logout();
     } finally {
@@ -341,44 +429,77 @@ function AuthenticatedApp({
             aria-controls="main-navbar"
             aria-expanded={open}
             aria-label="Apri navigazione"
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => {
+              setAccountMenuOpen(false);
+              setOpen((value) => !value);
+            }}
           >
             <span className="navbar-toggler-icon" />
           </button>
           <div className={`collapse navbar-collapse ${open ? 'show' : ''}`} id="main-navbar">
             <div className="navbar-nav me-auto">
-              <NavItem to="/" label="Bacheca" icon="bi-grid-1x2" onClick={() => setOpen(false)} end />
-              <NavItem to="/people" label="Persone" icon="bi-people" onClick={() => setOpen(false)} />
-              <NavItem to="/places" label="Luoghi" icon="bi-geo-alt" onClick={() => setOpen(false)} />
-              <NavItem to="/epochs" label="Epoche" icon="bi-hourglass-split" onClick={() => setOpen(false)} />
-              <NavItem to="/events" label="Eventi" icon="bi-calendar-event" onClick={() => setOpen(false)} />
-              <NavItem to="/search" label="Cerca" icon="bi-search" onClick={() => setOpen(false)} />
-              <NavItem to="/pulls" label="Estrazioni" icon="bi-shuffle" onClick={() => setOpen(false)} />
+              <NavItem to="/" label="Bacheca" icon="bi-grid-1x2" onClick={closeNavigation} end />
+              <NavItem to="/people" label="Persone" icon="bi-people" onClick={closeNavigation} />
+              <NavItem to="/places" label="Luoghi" icon="bi-geo-alt" onClick={closeNavigation} />
+              <NavItem to="/epochs" label="Epoche" icon="bi-hourglass-split" onClick={closeNavigation} />
+              <NavItem to="/events" label="Eventi" icon="bi-calendar-event" onClick={closeNavigation} />
+              <NavItem to="/search" label="Cerca" icon="bi-search" onClick={closeNavigation} />
+              <NavItem to="/pulls" label="Estrazioni" icon="bi-shuffle" onClick={closeNavigation} />
             </div>
-            <div className="d-flex align-items-center gap-2">
-              {user.is_admin && (
-                <NavLink
-                  className="btn btn-outline-secondary btn-sm admin-nav-button"
-                  to="/admin"
-                  title="Amministrazione"
-                  aria-label="Amministrazione"
-                  onClick={() => setOpen(false)}
+            <div className="account-nav d-flex align-items-center">
+              <div className="dropdown account-dropdown" ref={accountMenuRef}>
+                <button
+                  className="btn btn-outline-secondary btn-sm dropdown-toggle account-menu-toggle d-inline-flex align-items-center gap-2"
+                  id="account-menu-toggle"
+                  type="button"
+                  aria-controls="account-menu"
+                  aria-expanded={accountMenuOpen}
+                  aria-haspopup="true"
+                  onClick={() => setAccountMenuOpen((value) => !value)}
                 >
-                  <i className="bi bi-shield-lock" aria-hidden="true" />
-                </NavLink>
-              )}
-              <NavLink
-                className="nav-link small d-inline-flex align-items-center"
-                to="/profile"
-                onClick={() => setOpen(false)}
-              >
-                <i className="bi bi-person-circle me-1" aria-hidden="true" />
-                {user.display_name}
-              </NavLink>
-              <button className="btn btn-outline-secondary btn-sm" type="button" onClick={logout}>
-                <i className="bi bi-box-arrow-right me-1" />
-                Esci
-              </button>
+                  <i className="bi bi-person-circle" aria-hidden="true" />
+                  <span className="text-truncate">{user.display_name}</span>
+                </button>
+                <ul
+                  className={`dropdown-menu dropdown-menu-end${accountMenuOpen ? ' show' : ''}`}
+                  id="account-menu"
+                  aria-labelledby="account-menu-toggle"
+                >
+                  <li>
+                    <NavLink className="dropdown-item d-flex align-items-center gap-2" to="/profile" onClick={closeNavigation}>
+                      <i className="bi bi-person" aria-hidden="true" />
+                      Profilo
+                    </NavLink>
+                  </li>
+                  {user.is_admin && (
+                    <li>
+                      <NavLink className="dropdown-item d-flex align-items-center gap-2" to="/admin" onClick={closeNavigation}>
+                        <i className="bi bi-shield-lock" aria-hidden="true" />
+                        Amministrazione
+                      </NavLink>
+                    </li>
+                  )}
+                  <li><hr className="dropdown-divider" /></li>
+                  <li>
+                    <ThemeToggleButton
+                      className="dropdown-item d-flex align-items-center gap-2"
+                      colorMode={colorMode}
+                      onToggle={() => {
+                        onToggleColorMode();
+                        setAccountMenuOpen(false);
+                      }}
+                      showLabel
+                    />
+                  </li>
+                  <li><hr className="dropdown-divider" /></li>
+                  <li>
+                    <button className="dropdown-item d-flex align-items-center gap-2 text-danger" type="button" onClick={logout}>
+                      <i className="bi bi-box-arrow-right" aria-hidden="true" />
+                      Esci
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -416,6 +537,27 @@ function AuthenticatedApp({
         </Routes>
       </main>
     </>
+  );
+}
+
+function ThemeToggleButton({
+  colorMode,
+  onToggle,
+  className,
+  showLabel = false,
+}: {
+  colorMode: ColorMode;
+  onToggle: () => void;
+  className: string;
+  showLabel?: boolean;
+}) {
+  const switchesToDark = colorMode === 'light';
+  const label = switchesToDark ? 'Attiva tema scuro' : 'Attiva tema chiaro';
+  return (
+    <button className={className} type="button" title={label} aria-label={label} onClick={onToggle}>
+      <i className={`bi ${switchesToDark ? 'bi-moon-stars' : 'bi-sun'}`} aria-hidden="true" />
+      {showLabel && <span>{switchesToDark ? 'Tema scuro' : 'Tema chiaro'}</span>}
+    </button>
   );
 }
 
@@ -484,7 +626,7 @@ function Dashboard() {
       </div>
       <div className="row g-4">
         <div className="col-lg-5">
-          <section className="border rounded bg-white p-4 h-100">
+          <section className="border rounded bg-body p-4 h-100">
             <h2 className="h5">Elemento del giorno</h2>
             <p className="text-secondary mb-3">{entityLabels[daily.entity_type]} con rarità {daily.rarity}</p>
             <Link className="fs-4 fw-semibold text-decoration-none" to={detailPath(daily.entity_type, daily.id)}>
@@ -493,7 +635,7 @@ function Dashboard() {
           </section>
         </div>
         <div className="col-lg-7">
-          <section className="border rounded bg-white p-4">
+          <section className="border rounded bg-body p-4">
             <div className="d-flex justify-content-between align-items-center mb-3">
               <h2 className="h5 mb-0">Ultimi eventi</h2>
               <Link className="btn btn-outline-primary btn-sm" to="/events">Vedi tutti</Link>
@@ -578,7 +720,7 @@ function ProfilePage() {
       </div>
       <div className="row g-4">
         <div className="col-lg-4">
-          <section className="border rounded bg-white p-4 mb-4" aria-labelledby="account-heading">
+          <section className="border rounded bg-body p-4 mb-4" aria-labelledby="account-heading">
             <h2 className="h5" id="account-heading">Account</h2>
             <dl className="mb-0">
               <dt className="small text-secondary fw-normal">Nome visualizzato</dt>
@@ -587,7 +729,7 @@ function ProfilePage() {
               <dd className="mb-0">@{data.user.username}</dd>
             </dl>
           </section>
-          <section className="border rounded bg-white p-4" aria-labelledby="password-heading">
+          <section className="border rounded bg-body p-4" aria-labelledby="password-heading">
             <h2 className="h5" id="password-heading">Cambia password</h2>
             {formError && <ErrorAlert message={formError} />}
             {success && <div className="alert alert-success" role="status">{success}</div>}
@@ -656,7 +798,7 @@ function ProfilePage() {
           </section>
         </div>
         <div className="col-lg-8">
-          <section className="border rounded bg-white p-4" aria-labelledby="activity-heading">
+          <section className="border rounded bg-body p-4" aria-labelledby="activity-heading">
             <h2 className="h5 mb-3" id="activity-heading">Attività recenti</h2>
             {data.recent_activity.length === 0 ? (
               <div className="text-secondary py-3">Nessuna attività recente.</div>
@@ -691,7 +833,7 @@ function ProfilePage() {
 function MetricCard({ label, value, to, icon }: { label: string; value: number; to: string; icon: string; }) {
   return (
     <div className="col-6 col-xl-3">
-      <Link className="metric-card border rounded bg-white p-3 text-decoration-none d-block" to={to}>
+      <Link className="metric-card border rounded bg-body p-3 text-decoration-none d-block" to={to}>
         <div className="d-flex align-items-center justify-content-between">
           <span className="text-secondary">{label}</span>
           <i className={`bi ${icon} text-primary`} />
@@ -722,7 +864,7 @@ function PeopleList() {
       <div className="row g-3">
         {filtered.map((person) => (
           <div className="col-md-6 col-xl-4" key={person.id}>
-            <Link className="entity-card border rounded bg-white p-3 d-flex gap-3 text-decoration-none h-100" to={`/people/${person.id}`}>
+            <Link className="entity-card border rounded bg-body p-3 d-flex gap-3 text-decoration-none h-100" to={`/people/${person.id}`}>
               <EntityPreview asset={data?.previews.get(person.id)} label={person.alias} />
               <span className="min-w-0 flex-grow-1">
                 <span className="badge text-bg-light mb-2">{connotationLabels[person.connotation]}</span>
@@ -868,7 +1010,7 @@ function EntityList<T extends { id: number; }>({
     <div className="row g-3">
       {items.map((item) => (
         <div className="col-md-6 col-xl-4" key={item.id}>
-          <Link className="entity-card border rounded bg-white p-3 d-flex gap-3 text-decoration-none h-100" to={detailPath(entityType, item.id)}>
+          <Link className="entity-card border rounded bg-body p-3 d-flex gap-3 text-decoration-none h-100" to={detailPath(entityType, item.id)}>
             <EntityPreview asset={previews?.get(item.id)} label={titleFor(item)} />
             <span className="min-w-0 flex-grow-1">
               <span className="badge text-bg-light mb-2">{entityLabels[entityType]}</span>
@@ -1216,7 +1358,7 @@ function EntityFormShell({ title, backTo, children }: { title: string; backTo: s
           Indietro
         </Link>
       </div>
-      <div className="border rounded bg-white p-4">{children}</div>
+      <div className="border rounded bg-body p-4">{children}</div>
     </section>
   );
 }
@@ -1448,7 +1590,7 @@ export function DetailShell({
 
 function InfoGrid({ items }: { items: Array<[string, string]>; }) {
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <div className="row g-3">
         {items.map(([label, value]) => (
           <div className="col-sm-6 col-lg-3" key={label}>
@@ -1463,7 +1605,7 @@ function InfoGrid({ items }: { items: Array<[string, string]>; }) {
 
 function Description({ text }: { text?: string | null; }) {
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <h2 className="h5">Descrizione</h2>
       <p className="mb-0 text-preline">{text || 'Nessuna descrizione.'}</p>
     </section>
@@ -1729,7 +1871,7 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
   }
 
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2 className="h5 mb-0">Luoghi collegati</h2>
         <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, { place_id: '', motivation: '' }])}>
@@ -1798,7 +1940,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
   }
 
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2 className="h5 mb-0">Partecipanti</h2>
         <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, { person_id: '', role: '', motivation: '' }])}>
@@ -1846,7 +1988,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
 
 export function LinkedEvents({ events }: { events: PersonEvent[]; }) {
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <h2 className="h5">Eventi collegati</h2>
       {events.length === 0 ? <p className="text-secondary mb-0">Nessun evento collegato.</p> : (
         <div className="list-group list-group-flush">
@@ -1866,7 +2008,7 @@ export function LinkedEvents({ events }: { events: PersonEvent[]; }) {
 
 function LinkedPeople({ links }: { links: PlacePerson[]; }) {
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <h2 className="h5">Persone collegate</h2>
       {links.length === 0 ? <p className="text-secondary mb-0">Nessuna persona collegata.</p> : (
         <div className="list-group list-group-flush">
@@ -1884,7 +2026,7 @@ function LinkedPeople({ links }: { links: PlacePerson[]; }) {
 
 function EventListSection({ title, events }: { title: string; events: Event[]; }) {
   return (
-    <section className="border rounded bg-white p-4">
+    <section className="border rounded bg-body p-4">
       <h2 className="h5">{title}</h2>
       {events.length === 0 ? <p className="text-secondary mb-0">Nessun evento collegato.</p> : (
         <div className="list-group list-group-flush">
@@ -1970,7 +2112,7 @@ function PullsPage() {
   return (
     <section className="mx-auto pulls-page">
       <h1 className="h2 mb-4">Estrazioni</h1>
-      <div className="border rounded bg-white p-4">
+      <div className="border rounded bg-body p-4">
         <div className="row g-3 align-items-end">
           <div className="col-md-6">
             <label className="form-label" htmlFor="pull-type">Tipo</label>

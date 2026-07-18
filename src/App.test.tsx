@@ -4,23 +4,54 @@ import { MemoryRouter } from 'react-router-dom';
 import App, { AuthenticatedMedia, DetailShell, EventParticipantsEditor, LinkedEvents, MediaSection } from './App';
 import { api } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
+import { COLOR_MODE_STORAGE_KEY } from './theme';
 import type { EventParticipant, MediaAsset, Person, PersonEvent } from './types';
 
 const user = { id: 1, username: 'francesco', display_name: 'Francesco', is_admin: true };
+
+function installColorScheme(initial: boolean) {
+  let matches = initial;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = {
+    get matches() { return matches; },
+    media: '(prefers-color-scheme: dark)',
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+  } as unknown as MediaQueryList;
+  vi.stubGlobal('matchMedia', vi.fn(() => media));
+  return {
+    change(value: boolean) {
+      matches = value;
+      listeners.forEach((listener) => listener({ matches: value } as MediaQueryListEvent));
+    },
+  };
+}
 
 function json(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 }
 
 describe('App', () => {
+  let colorScheme: ReturnType<typeof installColorScheme>;
+
   afterEach(() => {
     cleanup();
     clearAccessToken();
+    window.localStorage.clear();
+    document.documentElement.removeAttribute('data-bs-theme');
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', '#1f7a4d');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
+    if (!document.querySelector('meta[name="theme-color"]')) {
+      const themeColor = document.createElement('meta');
+      themeColor.name = 'theme-color';
+      themeColor.content = '#1f7a4d';
+      document.head.appendChild(themeColor);
+    }
+    colorScheme = installColorScheme(false);
     window.location.hash = '';
     setAccessToken('test-session-token');
     vi.stubGlobal(
@@ -53,7 +84,17 @@ describe('App', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Wiki Parchino')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('Elemento demo')).toBeInTheDocument());
+    const accountMenu = screen.getByRole('button', { name: 'Francesco' });
+    expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(accountMenu);
+    expect(accountMenu).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('link', { name: 'Profilo' })).toHaveAttribute('href', '#/profile');
     expect(screen.getByRole('link', { name: 'Amministrazione' })).toHaveAttribute('href', '#/admin');
+    const themeToggle = screen.getByRole('button', { name: 'Attiva tema scuro' });
+    expect(screen.getByRole('button', { name: 'Esci' })).toBeInTheDocument();
+    fireEvent.click(themeToggle);
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('hides administration and blocks its route for regular users', async () => {
@@ -67,7 +108,28 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Accesso negato' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Francesco' }));
     expect(screen.queryByRole('link', { name: 'Amministrazione' })).not.toBeInTheDocument();
+  });
+
+  it('closes the account menu with Escape and an outside click', async () => {
+    render(<App />);
+    const accountMenu = await screen.findByRole('button', { name: 'Francesco' });
+    fireEvent.click(accountMenu);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
+    expect(accountMenu).toHaveFocus();
+    fireEvent.click(accountMenu);
+    fireEvent.mouseDown(document.body);
+    expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('logs out from the account dropdown', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Francesco' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Esci' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Accedi a Wiki Parchino' })).toBeInTheDocument());
+    expect(getAccessToken()).toBeNull();
   });
 
   it('renders administrator metrics, users, and recent activity', async () => {
@@ -98,10 +160,16 @@ describe('App', () => {
   });
 
   it('creates users only after matching password confirmation', async () => {
-    const createUser = vi.spyOn(api, 'createAdminUser').mockResolvedValue({
+    const createdUser = {
       id: 9, username: 'nuovo', display_name: 'Nuovo Utente', is_admin: false,
       is_active: true, created_at: '2026-07-18T10:00:00Z', updated_at: '2026-07-18T10:00:00Z',
       active_session_count: 0,
+    };
+    const createUser = vi.spyOn(api, 'createAdminUser').mockResolvedValue(createdUser);
+    vi.spyOn(api, 'adminUser').mockResolvedValue({
+      user: createdUser,
+      content_activity: [],
+      account_activity: [],
     });
     window.location.hash = '#/admin/users/new';
     render(<App />);
@@ -118,6 +186,7 @@ describe('App', () => {
     await waitFor(() => expect(createUser).toHaveBeenCalledWith({
       username: 'nuovo', display_name: 'Nuovo Utente', password: 'password-sicura', is_admin: false,
     }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Nuovo Utente' })).toBeInTheDocument());
   });
 
   it('confirms deactivation and sends the preserved account fields', async () => {
@@ -173,10 +242,40 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Accedi a Wiki Parchino' })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText(/Username/), { target: { value: 'francesco' } });
     fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 'password' } });
+    const themeToggle = screen.getByRole('button', { name: 'Attiva tema scuro' });
+    expect(themeToggle).toHaveClass('login-theme-toggle');
+    fireEvent.click(themeToggle);
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(window.localStorage.getItem(COLOR_MODE_STORAGE_KEY)).toBe('dark');
+    expect(screen.getByLabelText(/Username/)).toHaveValue('francesco');
+    expect(screen.getByLabelText(/Password/)).toHaveValue('password');
     fireEvent.click(screen.getByRole('button', { name: 'Entra' }));
 
     await waitFor(() => expect(screen.getByText('Elemento demo')).toBeInTheDocument());
     expect(getAccessToken()).toBe('new-session-token');
+  });
+
+  it('follows the system theme until the user stores an explicit preference', async () => {
+    clearAccessToken();
+    colorScheme.change(true);
+    const view = render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Accedi a Wiki Parchino' })).toBeInTheDocument());
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(window.localStorage.getItem(COLOR_MODE_STORAGE_KEY)).toBeNull();
+    colorScheme.change(false);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-bs-theme', 'light'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attiva tema scuro' }));
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#15191d');
+    colorScheme.change(false);
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+
+    view.unmount();
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Attiva tema chiaro' })).toBeInTheDocument());
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
   });
 
   it('returns to login when session validation receives 401', async () => {
