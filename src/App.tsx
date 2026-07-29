@@ -388,6 +388,7 @@ function LoginPage({
                     <p className="text-secondary">Un'estesa wiki della lore del Parchino.</p>
                     {loginDisabled && (
                       <MaintenanceWarning
+                        className="mb-3"
                         message={maintenance.message}
                         remainingMilliseconds={remainingMilliseconds}
                       />
@@ -626,14 +627,19 @@ function AuthenticatedApp({
 }
 
 function MaintenanceWarning({
+  className = '',
   message,
   remainingMilliseconds,
 }: {
+  className?: string;
   message: string | null;
   remainingMilliseconds: number | null;
 }) {
   return (
-    <div className="alert alert-warning d-flex align-items-start gap-3 maintenance-warning" role="alert">
+    <div
+      className={`alert alert-warning d-flex align-items-start gap-3 maintenance-warning ${className}`.trim()}
+      role="alert"
+    >
       <i className="bi bi-tools fs-4" aria-hidden="true" />
       <div>
         <strong className="d-block">Manutenzione programmata</strong>

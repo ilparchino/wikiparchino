@@ -306,6 +306,7 @@ describe('App', () => {
     expect(screen.getByLabelText(/Password/)).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Entra' })).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('Non è possibile avviare nuove sessioni');
+    expect(screen.getByRole('alert')).toHaveClass('mb-3');
   });
 
   it('clears the session and replaces the app when maintenance is active', async () => {
