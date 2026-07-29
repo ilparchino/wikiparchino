@@ -7,6 +7,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 ## Features
 
 - Bearer-authenticated login for fixed accounts with tab-scoped session persistence.
+- Live maintenance warnings, login blocking, session revocation handling, and service-unavailable states.
 - User profile with recent activity and password changing.
 - Administrator-only dashboard for system metrics, account management, session revocation, and filtered activity history.
 - Account dropdown for profile, theme, administrator, and logout actions.
@@ -41,6 +42,8 @@ The FastAPI backend is maintained as a separate repository and is required for a
 |   |-- App.tsx          Routes and application views
 |   |-- AdminPages.tsx   Administrator dashboard and account views
 |   |-- api.ts           Typed backend client
+|   |-- useMaintenance.ts Maintenance polling and countdown state
+|   |-- maintenanceEvents.ts Global maintenance response notifications
 |   |-- main.tsx         React entry point
 |   |-- styles.css       Project-specific Bootstrap overrides
 |   `-- types.ts         Frontend API types
@@ -86,6 +89,8 @@ Vite exposes `VITE_*` variables to browser code. Never place passwords, tokens, 
 
 The backend must allow the exact frontend origin and the `Authorization` header. Tokens are kept in `sessionStorage`, removed on logout or authorization failure, and never placed in URLs.
 
+The application checks maintenance status before restoring a session, polls every 30 seconds, and refreshes when the browser regains focus. Scheduled maintenance disables login and warns active users. Active maintenance clears the local token and replaces the application until the backend confirms availability.
+
 The color mode initially follows the operating-system preference. Choosing light or dark mode from the login card or account dropdown stores only that UI preference in `localStorage`; it does not contain account or authentication data.
 
 ## Running
@@ -128,7 +133,7 @@ With both application servers running, an optional semantic smoke test is:
 lightpanda fetch http://127.0.0.1:5173 --dump semantic_tree_text --wait-ms 1000
 ```
 
-Manual acceptance should cover login, navigation, the account dropdown, light and dark modes, each entity list/detail/form, relationships, image upload, search, random pulls, daily pulls, the collapsed mobile navbar, and administrator/non-administrator access to `/admin`.
+Manual acceptance should cover login, scheduled and active maintenance states, navigation, the account dropdown, light and dark modes, each entity list/detail/form, relationships, image upload, search, random pulls, daily pulls, the collapsed mobile navbar, and administrator/non-administrator access to `/admin`.
 
 ## Deployment Notes
 

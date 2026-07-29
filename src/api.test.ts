@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api, formatError, resolveApiBase } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
+import { subscribeToMaintenance } from './maintenanceEvents';
 
 describe('api client', () => {
   beforeEach(() => {
@@ -54,6 +55,53 @@ describe('api client', () => {
     expect(loginHeaders.has('Authorization')).toBe(false);
     expect(meHeaders.get('Authorization')).toBe('Bearer opaque-session-token');
     expect(fetchMock.mock.calls[1][1]).not.toHaveProperty('credentials');
+  });
+
+  it('loads maintenance status without authorization', async () => {
+    setAccessToken('must-not-be-sent');
+    const status = {
+      state: 'available',
+      server_time: '2026-07-29T10:00:00Z',
+      announced_at: null,
+      starts_at: null,
+      message: null,
+      login_allowed: true,
+      api_available: true,
+    };
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify(status))),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.maintenanceStatus()).resolves.toEqual(status);
+
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.has('Authorization')).toBe(false);
+  });
+
+  it('publishes structured maintenance responses without clearing the token', async () => {
+    setAccessToken('current-session');
+    const maintenance = {
+      state: 'active' as const,
+      server_time: '2026-07-29T10:15:00Z',
+      announced_at: '2026-07-29T10:00:00Z',
+      starts_at: '2026-07-29T10:15:00Z',
+      message: 'Aggiornamento',
+      login_allowed: false,
+      api_available: false,
+    };
+    const listener = vi.fn();
+    const unsubscribe = subscribeToMaintenance(listener);
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      detail: 'maintenance',
+      code: 'maintenance',
+      maintenance,
+    }), { status: 503 }))));
+
+    await expect(api.people()).rejects.toMatchObject({ status: 503, maintenance });
+    expect(listener).toHaveBeenCalledWith(maintenance);
+    expect(getAccessToken()).toBe('current-session');
+    unsubscribe();
   });
 
   it('clears the token after an authenticated 401 response', async () => {

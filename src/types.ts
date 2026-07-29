@@ -16,6 +16,16 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface MaintenanceStatus {
+  state: 'available' | 'scheduled' | 'active';
+  server_time: string;
+  announced_at: string | null;
+  starts_at: string | null;
+  message: string | null;
+  login_allowed: boolean;
+  api_available: boolean;
+}
+
 export interface ProfileActivity {
   entity_type: EntityType;
   entity_id: number;

@@ -12,6 +12,7 @@ import type {
   EventParticipant,
   EventParticipantInput,
   LoginResponse,
+  MaintenanceStatus,
   MediaAsset,
   Person,
   PersonEvent,
@@ -24,6 +25,7 @@ import type {
   User,
 } from './types';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
+import { isMaintenanceStatus, publishMaintenance } from './maintenanceEvents';
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
@@ -70,13 +72,20 @@ export class ApiError extends Error {
   readonly status: number;
   readonly detail: unknown;
   readonly authenticated: boolean;
+  readonly maintenance: MaintenanceStatus | null;
 
-  constructor(status: number, detail: unknown, authenticated: boolean) {
+  constructor(
+    status: number,
+    detail: unknown,
+    authenticated: boolean,
+    maintenance: MaintenanceStatus | null = null,
+  ) {
     super(httpErrorMessage(status, authenticated));
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
     this.authenticated = authenticated;
+    this.maintenance = maintenance;
   }
 }
 
@@ -114,13 +123,18 @@ async function responseFor(
       clearAccessToken();
     }
     let detail: unknown = null;
+    let maintenance: MaintenanceStatus | null = null;
     try {
       const payload = await response.json();
       detail = payload.detail ?? null;
+      if (payload.code === 'maintenance' && isMaintenanceStatus(payload.maintenance)) {
+        maintenance = payload.maintenance;
+        publishMaintenance(payload.maintenance);
+      }
     } catch {
       // The status is sufficient to produce a safe user-facing message.
     }
-    throw new ApiError(response.status, detail, authenticated);
+    throw new ApiError(response.status, detail, authenticated, maintenance);
   }
   return response;
 }
@@ -134,6 +148,8 @@ async function request<T>(path: string, init: RequestInit = {}, authenticated = 
 }
 
 export const api = {
+  maintenanceStatus: () =>
+    request<MaintenanceStatus>('/api/maintenance/status', {}, false),
   login: async (username: string, password: string) => {
     const session = await request<LoginResponse>(
       '/api/auth/login',

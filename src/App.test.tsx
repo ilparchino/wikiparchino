@@ -5,9 +5,18 @@ import App, { AuthenticatedMedia, DetailShell, EventParticipantsEditor, LinkedEv
 import { api } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 import { COLOR_MODE_STORAGE_KEY } from './theme';
-import type { EventParticipant, MediaAsset, Person, PersonEvent } from './types';
+import type { EventParticipant, MaintenanceStatus, MediaAsset, Person, PersonEvent } from './types';
 
 const user = { id: 1, username: 'francesco', display_name: 'Francesco', is_admin: true };
+const availableMaintenance: MaintenanceStatus = {
+  state: 'available',
+  server_time: '2026-07-29T10:00:00Z',
+  announced_at: null,
+  starts_at: null,
+  message: null,
+  login_allowed: true,
+  api_available: true,
+};
 
 function installColorScheme(initial: boolean) {
   let matches = initial;
@@ -58,6 +67,7 @@ describe('App', () => {
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith('/api/maintenance/status')) return json(availableMaintenance);
         if (url.endsWith('/api/auth/login')) {
           return json({
             access_token: 'new-session-token',
@@ -100,6 +110,7 @@ describe('App', () => {
   it('hides administration and blocks its route for regular users', async () => {
     const regular = { ...user, is_admin: false };
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/maintenance/status')) return json(availableMaintenance);
       if (String(input).endsWith('/api/me')) return json(regular);
       return json({});
     }));
@@ -255,6 +266,77 @@ describe('App', () => {
     expect(getAccessToken()).toBe('new-session-token');
   });
 
+  it('warns authenticated users during the maintenance countdown', async () => {
+    const startsAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    vi.spyOn(api, 'maintenanceStatus').mockResolvedValue({
+      state: 'scheduled',
+      server_time: new Date().toISOString(),
+      announced_at: new Date().toISOString(),
+      starts_at: startsAt,
+      message: 'Aggiornamento programmato',
+      login_allowed: false,
+      api_available: true,
+    });
+
+    render(<App />);
+
+    const warning = await screen.findByRole('alert');
+    expect(warning).toHaveTextContent('Manutenzione programmata');
+    expect(warning).toHaveTextContent('Aggiornamento programmato');
+    expect(warning).toHaveTextContent(/14 min|15 min/);
+    expect(await screen.findByText('Elemento demo')).toBeInTheDocument();
+    expect(getAccessToken()).toBe('test-session-token');
+  });
+
+  it('disables login as soon as maintenance is scheduled', async () => {
+    clearAccessToken();
+    vi.spyOn(api, 'maintenanceStatus').mockResolvedValue({
+      state: 'scheduled',
+      server_time: new Date().toISOString(),
+      announced_at: new Date().toISOString(),
+      starts_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+      message: null,
+      login_allowed: false,
+      api_available: true,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByLabelText(/Username/)).toBeDisabled();
+    expect(screen.getByLabelText(/Password/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Entra' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Non è possibile avviare nuove sessioni');
+  });
+
+  it('clears the session and replaces the app when maintenance is active', async () => {
+    vi.spyOn(api, 'maintenanceStatus').mockResolvedValue({
+      state: 'active',
+      server_time: new Date().toISOString(),
+      announced_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+      starts_at: new Date(Date.now() - 60_000).toISOString(),
+      message: 'Intervento sul database',
+      login_allowed: false,
+      api_available: false,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Wiki Parchino è in manutenzione' })).toBeInTheDocument();
+    expect(screen.getByText('Intervento sul database')).toBeInTheDocument();
+    await waitFor(() => expect(getAccessToken()).toBeNull());
+    expect(screen.queryByRole('heading', { name: 'Accedi a Wiki Parchino' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose login when the initial server status is unavailable', async () => {
+    clearAccessToken();
+    vi.spyOn(api, 'maintenanceStatus').mockRejectedValue(new TypeError('offline'));
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Server non disponibile' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Accedi a Wiki Parchino' })).not.toBeInTheDocument();
+  });
+
   it('follows the system theme until the user stores an explicit preference', async () => {
     clearAccessToken();
     colorScheme.change(true);
@@ -281,7 +363,11 @@ describe('App', () => {
   it('returns to login when session validation receives 401', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve(new Response(JSON.stringify({ detail: 'Session expired' }), { status: 401 }))),
+      vi.fn((input: RequestInfo | URL) => (
+        String(input).endsWith('/api/maintenance/status')
+          ? json(availableMaintenance)
+          : Promise.resolve(new Response(JSON.stringify({ detail: 'Session expired' }), { status: 401 }))
+      )),
     );
 
     render(<App />);

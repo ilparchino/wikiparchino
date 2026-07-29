@@ -11,7 +11,7 @@ import {
 } from 'react-router-dom';
 import { ApiError, api, formatError } from './api';
 import { AdminActivityPage, AdminDashboard, AdminUserCreatePage, AdminUserPage } from './AdminPages';
-import { getAccessToken, subscribeToSessionLoss } from './auth';
+import { clearAccessToken, getAccessToken, subscribeToSessionLoss } from './auth';
 import {
   applyColorMode,
   getPreferredColorMode,
@@ -20,6 +20,7 @@ import {
   subscribeToSystemColorMode,
   type ColorMode,
 } from './theme';
+import { useMaintenance } from './useMaintenance';
 import type {
   Connotation,
   EntityType,
@@ -27,6 +28,7 @@ import type {
   Event,
   EventParticipant,
   MediaAsset,
+  MaintenanceStatus,
   Person,
   PersonEvent,
   PersonPlace,
@@ -73,6 +75,8 @@ const connotationLabels: Record<Connotation, string> = {
   neutral: 'Neutra',
   unknown: 'Sconosciuta',
 };
+
+const defaultMaintenanceMessage = 'Wiki Parchino sarà temporaneamente non disponibile per manutenzione.';
 
 function assetPath(path: string): string {
   return `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
@@ -192,6 +196,16 @@ function RequiredMark() {
   return <span className="text-danger ms-1">*</span>;
 }
 
+function formatMaintenanceCountdown(milliseconds: number | null): string {
+  if (milliseconds === null) return '';
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) return `${hours} h ${String(minutes).padStart(2, '0')} min ${String(remainingSeconds).padStart(2, '0')} s`;
+  return `${minutes} min ${String(remainingSeconds).padStart(2, '0')} s`;
+}
+
 function App() {
   const { colorMode, toggleColorMode } = useColorMode();
   return (
@@ -231,25 +245,39 @@ function AppRoot({
   onToggleColorMode: () => void;
 }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
+  const maintenance = useMaintenance();
 
   useEffect(() => {
     return subscribeToSessionLoss(() => setUser(null));
   }, []);
 
   useEffect(() => {
+    if (!maintenance.initialized || authChecked || maintenance.status?.state === 'active') return;
+    if (maintenance.status === null && maintenance.unavailable) return;
     if (!getAccessToken()) {
-      setLoading(false);
+      setAuthChecked(true);
       return;
     }
     api
       .me()
       .then(setUser)
       .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => setAuthChecked(true));
+  }, [authChecked, maintenance.initialized, maintenance.status, maintenance.unavailable]);
 
-  if (loading) {
+  useEffect(() => {
+    if (maintenance.status?.state !== 'active') return;
+    clearAccessToken();
+    setUser(null);
+    setAuthChecked(true);
+  }, [maintenance.status?.state]);
+
+  if (!maintenance.initialized || (
+    maintenance.status?.state !== 'active'
+    && !(maintenance.status === null && maintenance.unavailable)
+    && !authChecked
+  )) {
     return (
       <main className="container py-5">
         <Loading />
@@ -257,13 +285,45 @@ function AppRoot({
     );
   }
 
+  if (maintenance.status?.state === 'active') {
+    return (
+      <MaintenancePage
+        colorMode={colorMode}
+        message={maintenance.status.message}
+        offline={maintenance.unavailable}
+        onRefresh={() => void maintenance.refresh()}
+        onToggleColorMode={onToggleColorMode}
+      />
+    );
+  }
+
+  if (maintenance.status === null && maintenance.unavailable) {
+    return (
+      <ServerUnavailablePage
+        colorMode={colorMode}
+        onRefresh={() => void maintenance.refresh()}
+        onToggleColorMode={onToggleColorMode}
+      />
+    );
+  }
+
   if (!user) {
-    return <LoginPage colorMode={colorMode} onToggleColorMode={onToggleColorMode} onLogin={setUser} />;
+    return (
+      <LoginPage
+        colorMode={colorMode}
+        maintenance={maintenance.status}
+        remainingMilliseconds={maintenance.remainingMilliseconds}
+        onToggleColorMode={onToggleColorMode}
+        onLogin={setUser}
+      />
+    );
   }
 
   return (
     <AuthenticatedApp
       colorMode={colorMode}
+      maintenance={maintenance.status}
+      remainingMilliseconds={maintenance.remainingMilliseconds}
       user={user}
       onToggleColorMode={onToggleColorMode}
       onUserChange={setUser}
@@ -274,10 +334,14 @@ function AppRoot({
 
 function LoginPage({
   colorMode,
+  maintenance,
+  remainingMilliseconds,
   onToggleColorMode,
   onLogin,
 }: {
   colorMode: ColorMode;
+  maintenance: MaintenanceStatus | null;
+  remainingMilliseconds: number | null;
   onToggleColorMode: () => void;
   onLogin: (user: User) => void;
 }) {
@@ -287,6 +351,7 @@ function LoginPage({
   const [submitting, setSubmitting] = useState(false);
   const season = getSeason(new Date());
   const seasonData = seasonConfig[season];
+  const loginDisabled = maintenance?.state === 'scheduled';
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -321,6 +386,12 @@ function LoginPage({
                     <p className="text-uppercase small fw-semibold text-secondary mb-2">{seasonData.label}</p>
                     <h1 className="h3 mb-3">Accedi a Wiki Parchino</h1>
                     <p className="text-secondary">Un'estesa wiki della lore del Parchino.</p>
+                    {loginDisabled && (
+                      <MaintenanceWarning
+                        message={maintenance.message}
+                        remainingMilliseconds={remainingMilliseconds}
+                      />
+                    )}
                     {error && <ErrorAlert message={error} />}
                     <div className="mb-3">
                       <label className="form-label" htmlFor="username">
@@ -333,6 +404,7 @@ function LoginPage({
                         value={username}
                         onChange={(event) => setUsername(event.target.value)}
                         autoComplete="username"
+                        disabled={loginDisabled}
                         required
                       />
                     </div>
@@ -348,10 +420,11 @@ function LoginPage({
                         value={password}
                         onChange={(event) => setPassword(event.target.value)}
                         autoComplete="current-password"
+                        disabled={loginDisabled}
                         required
                       />
                     </div>
-                    <button className="btn btn-primary w-100" type="submit" disabled={submitting}>
+                    <button className="btn btn-primary w-100" type="submit" disabled={submitting || loginDisabled}>
                       <i className="bi bi-box-arrow-in-right me-2" />
                       {submitting ? 'Accesso...' : 'Entra'}
                     </button>
@@ -368,12 +441,16 @@ function LoginPage({
 
 function AuthenticatedApp({
   colorMode,
+  maintenance,
+  remainingMilliseconds,
   user,
   onToggleColorMode,
   onUserChange,
   onLogout,
 }: {
   colorMode: ColorMode;
+  maintenance: MaintenanceStatus | null;
+  remainingMilliseconds: number | null;
   user: User;
   onToggleColorMode: () => void;
   onUserChange: (user: User) => void;
@@ -504,6 +581,14 @@ function AuthenticatedApp({
           </div>
         </div>
       </nav>
+      {maintenance?.state === 'scheduled' && (
+        <div className="container-fluid app-container pb-0">
+          <MaintenanceWarning
+            message={maintenance.message}
+            remainingMilliseconds={remainingMilliseconds}
+          />
+        </div>
+      )}
       <main className="container-fluid app-container">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -537,6 +622,101 @@ function AuthenticatedApp({
         </Routes>
       </main>
     </>
+  );
+}
+
+function MaintenanceWarning({
+  message,
+  remainingMilliseconds,
+}: {
+  message: string | null;
+  remainingMilliseconds: number | null;
+}) {
+  return (
+    <div className="alert alert-warning d-flex align-items-start gap-3 maintenance-warning" role="alert">
+      <i className="bi bi-tools fs-4" aria-hidden="true" />
+      <div>
+        <strong className="d-block">Manutenzione programmata</strong>
+        <span>{message || defaultMaintenanceMessage}</span>
+        <span className="d-block fw-semibold maintenance-countdown" aria-live="polite">
+          Il servizio non sarà disponibile tra {formatMaintenanceCountdown(remainingMilliseconds)}.
+        </span>
+        <span className="d-block small mt-1">Non è possibile avviare nuove sessioni.</span>
+      </div>
+    </div>
+  );
+}
+
+function MaintenancePage({
+  colorMode,
+  message,
+  offline,
+  onRefresh,
+  onToggleColorMode,
+}: {
+  colorMode: ColorMode;
+  message: string | null;
+  offline: boolean;
+  onRefresh: () => void;
+  onToggleColorMode: () => void;
+}) {
+  return (
+    <main className="maintenance-page d-flex align-items-center justify-content-center p-3">
+      <section className="maintenance-panel text-center">
+        <div className="d-flex justify-content-end mb-4">
+          <ThemeToggleButton
+            className="btn btn-outline-secondary maintenance-theme-toggle"
+            colorMode={colorMode}
+            onToggle={onToggleColorMode}
+          />
+        </div>
+        <i className="bi bi-tools maintenance-icon text-warning" aria-hidden="true" />
+        <h1 className="h2 mt-3">Wiki Parchino è in manutenzione</h1>
+        <p className="text-secondary mb-2">{message || defaultMaintenanceMessage}</p>
+        <p className="small text-secondary">
+          {offline
+            ? 'Il server non è al momento raggiungibile. Il controllo verrà ripetuto automaticamente.'
+            : 'Questa pagina controllerà automaticamente quando il servizio tornerà disponibile.'}
+        </p>
+        <button className="btn btn-outline-primary mt-3" type="button" onClick={onRefresh}>
+          <i className="bi bi-arrow-clockwise me-2" aria-hidden="true" />
+          Controlla ora
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function ServerUnavailablePage({
+  colorMode,
+  onRefresh,
+  onToggleColorMode,
+}: {
+  colorMode: ColorMode;
+  onRefresh: () => void;
+  onToggleColorMode: () => void;
+}) {
+  return (
+    <main className="maintenance-page d-flex align-items-center justify-content-center p-3">
+      <section className="maintenance-panel text-center">
+        <div className="d-flex justify-content-end mb-4">
+          <ThemeToggleButton
+            className="btn btn-outline-secondary maintenance-theme-toggle"
+            colorMode={colorMode}
+            onToggle={onToggleColorMode}
+          />
+        </div>
+        <i className="bi bi-wifi-off maintenance-icon text-secondary" aria-hidden="true" />
+        <h1 className="h2 mt-3">Server non disponibile</h1>
+        <p className="text-secondary">
+          Non è possibile verificare lo stato di Wiki Parchino. Riprova tra poco.
+        </p>
+        <button className="btn btn-primary mt-3" type="button" onClick={onRefresh}>
+          <i className="bi bi-arrow-clockwise me-2" aria-hidden="true" />
+          Riprova
+        </button>
+      </section>
+    </main>
   );
 }
 
