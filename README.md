@@ -11,6 +11,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 - User profile with recent activity and password changing.
 - Administrator-only dashboard for system metrics, account management, session revocation, and filtered activity history.
 - Account dropdown for profile, theme, administrator, and logout actions.
+- Administrator user management with a visibly protected, read-only `Proprietario` account.
 - Bootstrap light and dark modes with system-aware defaults and a persistent user override.
 - Dashboard with content totals and a daily item.
 - Routed list, detail, create, and edit views for every entity type.
@@ -158,6 +159,8 @@ The workflow uses `npm ci`; all packages are installed into the workflow workspa
 ## Security
 
 Do not commit `.env` files, tokens, real credentials, or private exported data. Treat any Bearer token as a password until it expires or is revoked, avoid rendering untrusted HTML, and keep frontend dependencies updated.
+
+New passwords must contain 12–200 printable characters. Printable Unicode and ordinary internal spaces are accepted; leading/trailing whitespace and control or non-printable characters are rejected without modifying the entered password. The profile and administrator reset interfaces share the same policy and validation behavior.
 
 ## License
 

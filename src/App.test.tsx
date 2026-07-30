@@ -1,13 +1,27 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App, { AuthenticatedMedia, DetailShell, EventParticipantsEditor, LinkedEvents, MediaSection } from './App';
 import { api } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 import { COLOR_MODE_STORAGE_KEY } from './theme';
-import type { EventParticipant, MaintenanceStatus, MediaAsset, Person, PersonEvent } from './types';
+import type {
+  AdminUserDetail,
+  Event,
+  EventParticipant,
+  MaintenanceStatus,
+  MediaAsset,
+  Person,
+  PersonEvent,
+} from './types';
 
-const user = { id: 1, username: 'francesco', display_name: 'Francesco', is_admin: true };
+const user = {
+  id: 1,
+  username: 'francesco',
+  display_name: 'Francesco',
+  is_admin: true,
+  is_owner: true,
+};
 const availableMaintenance: MaintenanceStatus = {
   state: 'available',
   server_time: '2026-07-29T10:00:00Z',
@@ -108,7 +122,7 @@ describe('App', () => {
   });
 
   it('hides administration and blocks its route for regular users', async () => {
-    const regular = { ...user, is_admin: false };
+    const regular = { ...user, is_admin: false, is_owner: false };
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       if (String(input).endsWith('/api/maintenance/status')) return json(availableMaintenance);
       if (String(input).endsWith('/api/me')) return json(regular);
@@ -167,12 +181,65 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Amministrazione' })).toBeInTheDocument());
     expect(screen.getByText('Utenti attivi')).toBeInTheDocument();
     expect(screen.getByText('@francesco')).toBeInTheDocument();
+    expect(screen.getByText('Proprietario')).toHaveClass('text-bg-warning');
     expect(screen.getByText(/Accesso riuscito/)).toBeInTheDocument();
+  });
+
+  it('renders the Owner as read-only for another administrator', async () => {
+    const otherAdmin = {
+      id: 2,
+      username: 'admin2',
+      display_name: 'Altro Admin',
+      is_admin: true,
+      is_owner: false,
+    };
+    const ownerAccount = {
+      ...user,
+      id: 1,
+      username: 'owner',
+      display_name: 'Proprietario Sistema',
+      is_active: true,
+      created_at: '2026-07-01T10:00:00Z',
+      updated_at: '2026-07-01T10:00:00Z',
+      active_session_count: 2,
+    };
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/maintenance/status')) return json(availableMaintenance);
+      if (url.endsWith('/api/me')) return json(otherAdmin);
+      return json({});
+    }));
+    vi.spyOn(api, 'adminUser').mockResolvedValue({
+      user: ownerAccount,
+      content_activity: [],
+      account_activity: [],
+    });
+    const update = vi.spyOn(api, 'updateAdminUser');
+    const reset = vi.spyOn(api, 'resetAdminUserPassword');
+    const revoke = vi.spyOn(api, 'revokeAdminUserSessions');
+    window.location.hash = '#/admin/users/1';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Proprietario Sistema' })).toBeInTheDocument());
+    expect(screen.getByText('Proprietario', { selector: '.badge' })).toHaveClass('text-bg-warning');
+    expect(screen.getByRole('note')).toHaveTextContent('Soltanto il Proprietario');
+    expect(screen.getByLabelText('Nome visualizzato')).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Amministratore' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Salva' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Disattiva' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Revoca sessioni' })).toBeDisabled();
+    expect(screen.getByText(/password del Proprietario non può essere reimpostata/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Nuova password/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Proprietario' })).not.toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
   });
 
   it('creates users only after matching password confirmation', async () => {
     const createdUser = {
-      id: 9, username: 'nuovo', display_name: 'Nuovo Utente', is_admin: false,
+      id: 9, username: 'nuovo', display_name: 'Nuovo Utente', is_admin: false, is_owner: false,
       is_active: true, created_at: '2026-07-18T10:00:00Z', updated_at: '2026-07-18T10:00:00Z',
       active_session_count: 0,
     };
@@ -185,24 +252,26 @@ describe('App', () => {
     window.location.hash = '#/admin/users/new';
     render(<App />);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Nuovo utente' })).toBeInTheDocument());
+    expect(screen.getAllByRole('button', { name: 'Mostra password' })).toHaveLength(2);
     fireEvent.change(screen.getByLabelText('Username *'), { target: { value: 'nuovo' } });
     fireEvent.change(screen.getByLabelText('Nome visualizzato *'), { target: { value: 'Nuovo Utente' } });
-    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'password-sicura' } });
+    expect(screen.getByText(/Da 12 a 200 caratteri stampabili/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'password nuova café ☕' } });
     fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password-diversa' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('conferma');
     expect(createUser).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password-sicura' } });
+    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password nuova café ☕' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
     await waitFor(() => expect(createUser).toHaveBeenCalledWith({
-      username: 'nuovo', display_name: 'Nuovo Utente', password: 'password-sicura', is_admin: false,
+      username: 'nuovo', display_name: 'Nuovo Utente', password: 'password nuova café ☕', is_admin: false,
     }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Nuovo Utente' })).toBeInTheDocument());
   });
 
   it('confirms deactivation and sends the preserved account fields', async () => {
     const managed = {
-      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false,
+      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false, is_owner: false,
       is_active: true, created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T10:00:00Z',
       active_session_count: 1,
     };
@@ -222,28 +291,102 @@ describe('App', () => {
 
   it('resets a managed user password and revokes their sessions', async () => {
     const managed = {
-      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false,
+      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false, is_owner: false,
       is_active: true, created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T10:00:00Z',
       active_session_count: 2,
     };
-    vi.spyOn(api, 'adminUser').mockResolvedValue({ user: managed, content_activity: [], account_activity: [] });
-    const resetPassword = vi.spyOn(api, 'resetAdminUserPassword').mockResolvedValue(undefined);
-    const revokeSessions = vi.spyOn(api, 'revokeAdminUserSessions').mockResolvedValue({ revoked_count: 2 });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const refreshed = { ...managed, active_session_count: 0 };
+    let completeRefresh: ((value: AdminUserDetail) => void) | undefined;
+    const adminUser = vi.spyOn(api, 'adminUser')
+      .mockResolvedValueOnce({ user: managed, content_activity: [], account_activity: [] })
+      .mockImplementationOnce(
+        () => new Promise<AdminUserDetail>((resolve) => { completeRefresh = resolve; }),
+      );
+    let completeReset: (() => void) | undefined;
+    const resetPassword = vi.spyOn(api, 'resetAdminUserPassword').mockImplementation(
+      () => new Promise<void>((resolve) => { completeReset = resolve; }),
+    );
     window.location.hash = '#/admin/users/8';
 
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('Nuova password'), { target: { value: 'password-nuova-sicura' } });
-    fireEvent.change(screen.getByLabelText('Conferma password'), { target: { value: 'password-nuova-sicura' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Reimposta password' }));
-    await waitFor(() => expect(resetPassword).toHaveBeenCalledWith(8, 'password-nuova-sicura'));
+    expect(screen.queryByLabelText(/Password attuale/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Da 12 a 200 caratteri stampabili/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Mostra password' })).toHaveLength(2);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Revoca sessioni' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Revoca sessioni' }));
-    await waitFor(() => expect(revokeSessions).toHaveBeenCalledWith(8));
-    expect(window.confirm).toHaveBeenCalledWith('Revocare le sessioni di @gestito?');
+    const newPassword = screen.getByLabelText(/^Nuova password/);
+    const confirmation = screen.getByLabelText(/^Conferma nuova password/);
+    fireEvent.change(newPassword, { target: { value: ' password nuova café ☕' } });
+    fireEvent.change(confirmation, { target: { value: ' password nuova café ☕' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna password' }));
+    expect(await screen.findByText(/non può iniziare o terminare/)).toBeInTheDocument();
+    expect(resetPassword).not.toHaveBeenCalled();
+    expect(newPassword).toHaveValue(' password nuova café ☕');
+    expect(confirmation).toHaveValue(' password nuova café ☕');
+
+    fireEvent.change(newPassword, { target: { value: 'password nuova café ☕' } });
+    fireEvent.change(confirmation, { target: { value: 'password nuova café ☕' } });
+    const revealNewPassword = newPassword.closest('.input-group')?.querySelector<HTMLButtonElement>(
+      '.password-visibility-toggle',
+    );
+    expect(revealNewPassword).toBeDefined();
+    fireEvent.click(revealNewPassword!);
+    expect(newPassword).toHaveAttribute('type', 'text');
+    const submitPassword = screen.getByRole('button', { name: 'Aggiorna password' });
+    fireEvent.click(submitPassword);
+    await waitFor(() => expect(resetPassword).toHaveBeenCalledWith(8, 'password nuova café ☕'));
+    expect(submitPassword).toBeDisabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    completeReset?.();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Tutte le sessioni dell’utente sono state revocate',
+    );
+    await waitFor(() => expect(adminUser).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Password aggiornata');
+    expect(newPassword).toHaveValue('');
+    expect(confirmation).toHaveValue('');
+    expect(newPassword).toHaveAttribute('type', 'password');
+    expect(confirmation).toHaveAttribute('type', 'password');
+
+    completeRefresh?.({
+      user: refreshed,
+      content_activity: [],
+      account_activity: [],
+    });
+    const sessions = screen.getByRole('heading', { name: 'Sessioni' }).closest('section');
+    expect(sessions).not.toBeNull();
+    await waitFor(() => expect(within(sessions!).getByText('0')).toBeInTheDocument());
+    expect(screen.getByRole('status')).toHaveTextContent('Password aggiornata');
+    expect(screen.getByRole('button', { name: 'Revoca sessioni' })).toBeDisabled();
+  });
+
+  it('preserves admin password feedback and content when the detail refresh fails', async () => {
+    const managed = {
+      id: 8, username: 'gestito', display_name: 'Utente Gestito', is_admin: false, is_owner: false,
+      is_active: true, created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T10:00:00Z',
+      active_session_count: 1,
+    };
+    vi.spyOn(api, 'adminUser')
+      .mockResolvedValueOnce({ user: managed, content_activity: [], account_activity: [] })
+      .mockRejectedValueOnce(new Error('offline'));
+    vi.spyOn(api, 'resetAdminUserPassword').mockResolvedValue(undefined);
+    window.location.hash = '#/admin/users/8';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/^Nuova password/), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.change(screen.getByLabelText(/^Conferma nuova password/), { target: { value: 'password-nuova-sicura' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aggiorna password' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Password aggiornata');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Non è stato possibile caricare i dati amministrativi',
+    );
+    expect(screen.getByRole('heading', { name: 'Utente Gestito' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Password aggiornata');
   });
 
   it('renders login without a token and stores the token after authentication', async () => {
@@ -251,6 +394,7 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Accedi a Wiki Parchino' })).toBeInTheDocument());
+    expect(screen.getAllByRole('button', { name: 'Mostra password' })).toHaveLength(1);
     fireEvent.change(screen.getByLabelText(/Username/), { target: { value: 'francesco' } });
     fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 'password' } });
     const themeToggle = screen.getByRole('button', { name: 'Attiva tema scuro' });
@@ -406,6 +550,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Profilo' })).toBeInTheDocument());
     expect(screen.getByText('@francesco')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Viaggio memorabile/ })).toHaveAttribute('href', '#/events/7');
+    expect(screen.getByText(/Da 12 a 200 caratteri stampabili/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Mostra password' })).toHaveLength(3);
     fireEvent.change(screen.getByLabelText(/Password attuale/), { target: { value: 'password-attuale' } });
     fireEvent.change(screen.getByLabelText(/^Nuova password/), { target: { value: 'password-nuova-sicura' } });
     fireEvent.change(screen.getByLabelText(/Conferma nuova password/), { target: { value: 'password-nuova-sicura' } });
@@ -425,16 +571,37 @@ describe('App', () => {
       updated_by: 1,
     };
     vi.spyOn(api, 'people').mockResolvedValue([
-      { id: 1, alias: 'Dino', sex: 'male', connotation: 'positive', ...metadata } as Person,
+      {
+        id: 1,
+        alias: 'Dino',
+        name: 'Nome',
+        surname: 'Cognome',
+        sex: 'male',
+        connotation: 'positive',
+        description: 'Descrizione della persona',
+        ...metadata,
+      } as Person,
     ]);
     vi.spyOn(api, 'places').mockResolvedValue([
       { id: 2, name: 'Parchino', description: null, ...metadata },
     ]);
     vi.spyOn(api, 'epochs').mockResolvedValue([
-      { id: 3, name: 'Post-Covid', description: null, ...metadata },
+      { id: 3, name: 'Post-Covid', description: 'Descrizione dell epoca', ...metadata },
     ]);
     vi.spyOn(api, 'events').mockResolvedValue([
-      { id: 4, title: 'APPoti APPiedi', place_id: 2, epoch_id: 3, ...metadata },
+      {
+        id: 4,
+        title: 'APPoti APPiedi',
+        description: 'Descrizione dell evento',
+        place_id: 2,
+        epoch_id: 3,
+        year: 2025,
+        month: 7,
+        day: null,
+        place: { id: 2, name: 'Parchino', description: null, ...metadata },
+        epoch: { id: 3, name: 'Post-Covid', description: null, ...metadata },
+        ...metadata,
+      } as Event,
     ]);
     vi.spyOn(api, 'mediaPreviews').mockImplementation(async (ids) =>
       ids.map((id) => ({
@@ -449,19 +616,106 @@ describe('App', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:entity-preview');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
 
-    for (const [route, label] of [
-      ['#/people', 'Dino'],
-      ['#/places', 'Parchino'],
-      ['#/epochs', 'Post-Covid'],
-      ['#/events', 'APPoti APPiedi'],
-    ]) {
+    const listCases: Array<{
+      route: string;
+      label: string;
+      subtitle: string | null;
+      description: string;
+    }> = [
+      { route: '#/people', label: 'Dino', subtitle: 'Nome Cognome', description: 'Descrizione della persona' },
+      { route: '#/places', label: 'Parchino', subtitle: null, description: 'Nessuna descrizione' },
+      { route: '#/epochs', label: 'Post-Covid', subtitle: null, description: 'Descrizione dell epoca' },
+      {
+        route: '#/events',
+        label: 'APPoti APPiedi',
+        subtitle: 'Parchino · Post-Covid · luglio 2025',
+        description: 'Descrizione dell evento',
+      },
+    ];
+
+    for (const { route, label, subtitle, description } of listCases) {
       window.location.hash = route;
       render(<App />);
-      await waitFor(() => expect(screen.getByRole('img', { name: `Anteprima di ${label}` })).toBeInTheDocument());
-      expect(screen.getByRole('img', { name: `Anteprima di ${label}` }).closest('.entity-preview')).toBeInTheDocument();
+      const image = await screen.findByRole('img', { name: `Anteprima di ${label}` });
+      const preview = image.closest('.entity-preview');
+      const card = image.closest('.entity-card') as HTMLElement;
+      expect(preview).toBeInTheDocument();
+      expect(preview?.querySelector('.entity-preview-backdrop')).toHaveAttribute('aria-hidden', 'true');
+      expect(preview?.querySelector('.entity-preview-image')).toBe(image);
+      expect(card).toBeInTheDocument();
+      expect(card).toHaveClass('entity-card');
+      expect(within(card).getByText(description)).toHaveClass('entity-card-description');
+      if (subtitle) {
+        expect(within(card).getByText(subtitle)).toHaveClass('entity-card-subtitle');
+      } else {
+        expect(card.querySelector('.entity-card-subtitle')).not.toBeInTheDocument();
+      }
       expect(screen.queryByText('non-visibile.png')).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  it('uses the requested connotation colors only on person cards', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    vi.spyOn(api, 'people').mockResolvedValue([
+      { id: 1, alias: 'Positiva', sex: 'female', connotation: 'positive', ...metadata },
+      { id: 2, alias: 'Negativa', sex: 'male', connotation: 'negative', ...metadata },
+      { id: 3, alias: 'Neutra', sex: 'other', connotation: 'neutral', ...metadata },
+      { id: 4, alias: 'Sconosciuta', sex: 'unknown', connotation: 'unknown', ...metadata },
+    ] as Person[]);
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    window.location.hash = '#/people';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Persone' })).toBeInTheDocument());
+    expect(screen.getByText('Positiva', { selector: '.badge' })).toHaveClass('text-bg-success');
+    expect(screen.getByText('Negativa', { selector: '.badge' })).toHaveClass('text-bg-danger');
+    expect(screen.getByText('Neutra', { selector: '.badge' })).toHaveClass('text-bg-light');
+    expect(screen.getByText('Sconosciuta', { selector: '.badge' })).toHaveClass('text-bg-secondary');
+    expect(screen.queryByText('Persona', { selector: '.badge' })).not.toBeInTheDocument();
+  });
+
+  it('formats every supported event partial date in Italian', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    const place = { id: 20, name: 'Luogo', ...metadata };
+    const epoch = { id: 21, name: 'Epoca', ...metadata };
+    const baseEvent = {
+      place_id: place.id,
+      epoch_id: epoch.id,
+      place,
+      epoch,
+      description: null,
+      ...metadata,
+    };
+    vi.spyOn(api, 'events').mockResolvedValue([
+      { ...baseEvent, id: 1, title: 'Solo anno', year: 2025, month: null, day: null },
+      { ...baseEvent, id: 2, title: 'Anno e mese', year: 2025, month: 7, day: null },
+      { ...baseEvent, id: 3, title: 'Data completa', year: 2025, month: 7, day: 14 },
+      { ...baseEvent, id: 4, title: 'Data ignota', year: null, month: null, day: null },
+    ] as Event[]);
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    window.location.hash = '#/events';
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Eventi' })).toBeInTheDocument());
+    expect(screen.getByText('Luogo · Epoca · 2025')).toBeInTheDocument();
+    expect(screen.getByText('Luogo · Epoca · luglio 2025')).toBeInTheDocument();
+    expect(screen.getByText('Luogo · Epoca · 14 luglio 2025')).toBeInTheDocument();
+    expect(screen.getByText('Luogo · Epoca · Data sconosciuta')).toBeInTheDocument();
   });
 
   it('shows the image placeholder when a listed entity has no media', async () => {
@@ -500,7 +754,13 @@ describe('App', () => {
 
     const { rerender, unmount } = render(<AuthenticatedMedia asset={asset} />);
 
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:authenticated-image'));
+    const image = await screen.findByRole('img', { name: 'Immagine 1 di 1' });
+    expect(image).toHaveAttribute('src', 'blob:authenticated-image');
+    expect(image).toHaveClass('media-carousel-image');
+    expect(image.closest('.media-carousel-frame')?.querySelector('.media-carousel-backdrop')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
     rerender(<AuthenticatedMedia asset={replacementAsset} />);
     await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:replacement-image'));
     expect(api.mediaBlob).toHaveBeenNthCalledWith(1, 9, '2026-07-15T10:00:00Z');
