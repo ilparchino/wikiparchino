@@ -21,6 +21,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 - Cross-entity search.
 - Weighted random lottery and item-of-the-day activity.
 - Seasonal designer branding selected from the current date.
+- Italian partial-date formatting and epoch-range checks shared by epoch and event forms.
 - Responsive Bootstrap navigation and forms.
 
 ## Technology

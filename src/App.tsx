@@ -15,6 +15,16 @@ import { clearAccessToken, getAccessToken, subscribeToSessionLoss } from './auth
 import { PasswordForm } from './PasswordForm';
 import { PasswordInput } from './PasswordInput';
 import {
+  epochEnd,
+  epochRangeError,
+  epochStart,
+  eventEpochConflict,
+  formatEpochRange,
+  formatPartialDate,
+  partialDateError,
+  type PartialDateValue,
+} from './partialDates';
+import {
   applyColorMode,
   getPreferredColorMode,
   getStoredColorMode,
@@ -85,21 +95,6 @@ const connotationBadgeClasses: Record<Connotation, string> = {
   unknown: 'text-bg-secondary',
 };
 
-const italianMonths = [
-  'gennaio',
-  'febbraio',
-  'marzo',
-  'aprile',
-  'maggio',
-  'giugno',
-  'luglio',
-  'agosto',
-  'settembre',
-  'ottobre',
-  'novembre',
-  'dicembre',
-] as const;
-
 const defaultMaintenanceMessage = 'Wiki Parchino sarà temporaneamente non disponibile per manutenzione.';
 
 function assetPath(path: string): string {
@@ -126,14 +121,6 @@ function cleanOptional(value: string): string | null {
 
 function nullableNumber(value: string): number | null {
   return value.trim() === '' ? null : Number(value);
-}
-
-function formatDate(event: Pick<Event, 'year' | 'month' | 'day'>): string {
-  if (!event.year) return 'Data sconosciuta';
-  if (!event.month) return String(event.year);
-  const month = italianMonths[event.month - 1];
-  if (!month) return String(event.year);
-  return event.day ? `${event.day} ${month} ${event.year}` : `${month} ${event.year}`;
 }
 
 function getSeason(date: Date): Season {
@@ -854,7 +841,7 @@ function Dashboard() {
                 <Link className="list-group-item list-group-item-action px-0" to={`/events/${event.id}`} key={event.id}>
                   <div className="d-flex justify-content-between gap-3">
                     <span className="fw-semibold">{event.title}</span>
-                    <span className="text-secondary small">{formatDate(event)}</span>
+                    <span className="text-secondary small">{formatPartialDate(event)}</span>
                   </div>
                 </Link>
               ))}
@@ -1029,6 +1016,7 @@ function EpochsList() {
         previews={data?.previews}
         entityType="epoch"
         titleFor={(epoch) => epoch.name}
+        subtitleFor={formatEpochRange}
         descriptionFor={(epoch) => epoch.description}
       />
     </ListPage>
@@ -1055,7 +1043,7 @@ function EventsList() {
         previews={data?.previews}
         entityType="event"
         titleFor={(event) => event.title}
-        subtitleFor={(event) => [event.place?.name, event.epoch?.name, formatDate(event)].filter(Boolean).join(' · ')}
+        subtitleFor={(event) => [event.place?.name, event.epoch?.name, formatPartialDate(event)].filter(Boolean).join(' · ')}
         descriptionFor={(event) => event.description}
       />
     </ListPage>
@@ -1261,25 +1249,155 @@ function PersonForm({ mode }: { mode: 'create' | 'edit'; }) {
 }
 
 function PlaceForm({ mode }: { mode: 'create' | 'edit'; }) {
-  return <NamedEntityForm<Place> mode={mode} entityType="place" load={api.place} create={api.createPlace} update={api.updatePlace} />;
+  return <NamedEntityForm mode={mode} load={api.place} create={api.createPlace} update={api.updatePlace} />;
 }
 
 function EpochForm({ mode }: { mode: 'create' | 'edit'; }) {
-  return <NamedEntityForm<Epoch> mode={mode} entityType="epoch" load={api.epoch} create={api.createEpoch} update={api.updateEpoch} />;
+  const { id } = useParams();
+  const epochId = parseRouteId(id);
+  const navigate = useNavigate();
+  const isEdit = mode === 'edit';
+  const { data, loading, error } = useAsync(
+    async (): Promise<[Epoch | null, Event[]]> => (
+      isEdit && epochId
+        ? Promise.all([api.epoch(epochId), api.epochEvents(epochId)])
+        : [null, []]
+    ),
+    [mode, epochId],
+  );
+  const [draft, setDraft] = useState({
+    name: '',
+    description: '',
+    rarity: '1',
+    start_year: '',
+    start_month: '',
+    start_day: '',
+    end_year: '',
+    end_month: '',
+    end_day: '',
+  });
+  const [validated, setValidated] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const epoch = data?.[0];
+    if (!epoch) return;
+    setDraft({
+      name: epoch.name,
+      description: epoch.description ?? '',
+      rarity: String(epoch.rarity),
+      start_year: epoch.start_year ? String(epoch.start_year) : '',
+      start_month: epoch.start_month ? String(epoch.start_month) : '',
+      start_day: epoch.start_day ? String(epoch.start_day) : '',
+      end_year: epoch.end_year ? String(epoch.end_year) : '',
+      end_month: epoch.end_month ? String(epoch.end_month) : '',
+      end_day: epoch.end_day ? String(epoch.end_day) : '',
+    });
+  }, [data]);
+
+  const proposedRange = {
+    start_year: nullableNumber(draft.start_year),
+    start_month: nullableNumber(draft.start_month),
+    start_day: nullableNumber(draft.start_day),
+    end_year: nullableNumber(draft.end_year),
+    end_month: nullableNumber(draft.end_month),
+    end_day: nullableNumber(draft.end_day),
+  };
+  const rangeError = epochRangeError(proposedRange);
+  const incompatibleEvents = (data?.[1] ?? []).filter(
+    (linkedEvent) => eventEpochConflict(linkedEvent, proposedRange) !== null,
+  );
+  const hasDateConflict = Boolean(rangeError) || incompatibleEvents.length > 0;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setValidated(true);
+    if (!event.currentTarget.checkValidity() || hasDateConflict) return;
+    setSubmitError(null);
+    try {
+      const payload = {
+        name: draft.name.trim(),
+        description: cleanOptional(draft.description),
+        rarity: Number(draft.rarity),
+        ...proposedRange,
+      };
+      const saved = isEdit && epochId
+        ? await api.updateEpoch(epochId, payload)
+        : await api.createEpoch(payload);
+      navigate(`/epochs/${saved.id}`);
+    } catch (err) {
+      setSubmitError(formatError(err, 'Non è stato possibile salvare le modifiche.'));
+    }
+  }
+
+  if (loading) return <Loading />;
+  if (error) return <ErrorAlert message={error} />;
+
+  const cancelTo = isEdit && epochId ? `/epochs/${epochId}` : '/epochs';
+  return (
+    <EntityFormShell title={isEdit ? 'Modifica epoca' : 'Nuova epoca'} backTo={cancelTo}>
+      {submitError && <ErrorAlert message={submitError} />}
+      {rangeError && <ErrorAlert message={rangeError} />}
+      {incompatibleEvents.length > 0 && (
+        <div className="alert alert-warning" role="alert">
+          <strong className="d-block mb-1">Eventi fuori dall’intervallo proposto</strong>
+          <span>
+            Modifica le date prima di salvare. Eventi interessati:{' '}
+            {incompatibleEvents.map((linkedEvent) => linkedEvent.title).join(', ')}.
+          </span>
+        </div>
+      )}
+      <form className={validated ? 'was-validated' : ''} noValidate onSubmit={submit}>
+        <div className="row g-3">
+          <div className="col-md-8">
+            <label className="form-label" htmlFor="name">Nome<RequiredMark /></label>
+            <input className="form-control" id="name" required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+            <div className="invalid-feedback">Inserisci un nome.</div>
+          </div>
+          <div className="col-md-4">
+            <RarityInput value={draft.rarity} onChange={(rarity) => setDraft({ ...draft, rarity })} />
+          </div>
+          <PartialDateFields
+            idPrefix="epoch-start"
+            legend="Data di inizio"
+            value={{
+              year: draft.start_year,
+              month: draft.start_month,
+              day: draft.start_day,
+            }}
+            onChange={(part, value) => setDraft({ ...draft, [`start_${part}`]: value })}
+          />
+          <PartialDateFields
+            idPrefix="epoch-end"
+            legend="Data di fine"
+            value={{
+              year: draft.end_year,
+              month: draft.end_month,
+              day: draft.end_day,
+            }}
+            onChange={(part, value) => setDraft({ ...draft, [`end_${part}`]: value })}
+          />
+          <div className="col-12">
+            <label className="form-label" htmlFor="description">Descrizione</label>
+            <textarea className="form-control" id="description" rows={5} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          </div>
+        </div>
+        <FormActions cancelTo={cancelTo} disabled={hasDateConflict} />
+      </form>
+    </EntityFormShell>
+  );
 }
 
-function NamedEntityForm<T extends Place | Epoch>({
+function NamedEntityForm({
   mode,
-  entityType,
   load,
   create,
   update,
 }: {
   mode: 'create' | 'edit';
-  entityType: 'place' | 'epoch';
-  load: (id: number) => Promise<T>;
-  create: (payload: { name: string; description: string | null; rarity: number; }) => Promise<T>;
-  update: (id: number, payload: { name: string; description: string | null; rarity: number; }) => Promise<T>;
+  load: (id: number) => Promise<Place>;
+  create: (payload: { name: string; description: string | null; rarity: number; }) => Promise<Place>;
+  update: (id: number, payload: { name: string; description: string | null; rarity: number; }) => Promise<Place>;
 }) {
   const { id } = useParams();
   const entityId = parseRouteId(id);
@@ -1302,7 +1420,7 @@ function NamedEntityForm<T extends Place | Epoch>({
     try {
       const payload = { name: draft.name.trim(), description: cleanOptional(draft.description), rarity: Number(draft.rarity) };
       const saved = isEdit && entityId ? await update(entityId, payload) : await create(payload);
-      navigate(detailPath(entityType, saved.id));
+      navigate(`/places/${saved.id}`);
     } catch (err) {
       setSubmitError(formatError(err, 'Non è stato possibile salvare le modifiche.'));
     }
@@ -1311,8 +1429,8 @@ function NamedEntityForm<T extends Place | Epoch>({
   if (loading) return <Loading />;
   if (error) return <ErrorAlert message={error} />;
 
-  const title = `${isEdit ? 'Modifica' : 'Nuovo'} ${entityLabels[entityType].toLowerCase()}`;
-  const cancelTo = isEdit && entityId ? detailPath(entityType, entityId) : entityPaths[entityType];
+  const title = isEdit ? 'Modifica luogo' : 'Nuovo luogo';
+  const cancelTo = isEdit && entityId ? `/places/${entityId}` : '/places';
   return (
     <EntityFormShell title={title} backTo={cancelTo}>
       {submitError && <ErrorAlert message={submitError} />}
@@ -1337,6 +1455,70 @@ function NamedEntityForm<T extends Place | Epoch>({
   );
 }
 
+type PartialDateDraft = {
+  year: string;
+  month: string;
+  day: string;
+};
+
+function PartialDateFields({
+  idPrefix,
+  legend,
+  value,
+  onChange,
+}: {
+  idPrefix: string;
+  legend: string;
+  value: PartialDateDraft;
+  onChange: (part: keyof PartialDateDraft, value: string) => void;
+}) {
+  return (
+    <fieldset className="col-12">
+      <legend className="h6 mb-2">{legend}</legend>
+      <div className="row g-3">
+        <div className="col-md-4">
+          <label className="form-label" htmlFor={`${idPrefix}-year`}>Anno</label>
+          <input
+            className="form-control"
+            id={`${idPrefix}-year`}
+            type="number"
+            min="1900"
+            value={value.year}
+            onChange={(event) => onChange('year', event.target.value)}
+            placeholder="yyyy"
+          />
+        </div>
+        <div className="col-md-4">
+          <label className="form-label" htmlFor={`${idPrefix}-month`}>Mese</label>
+          <input
+            className="form-control"
+            id={`${idPrefix}-month`}
+            type="number"
+            min="1"
+            max="12"
+            value={value.month}
+            onChange={(event) => onChange('month', event.target.value)}
+            placeholder="mm"
+          />
+        </div>
+        <div className="col-md-4">
+          <label className="form-label" htmlFor={`${idPrefix}-day`}>Giorno</label>
+          <input
+            className="form-control"
+            id={`${idPrefix}-day`}
+            type="number"
+            min="1"
+            max="31"
+            value={value.day}
+            onChange={(event) => onChange('day', event.target.value)}
+            placeholder="dd"
+          />
+        </div>
+      </div>
+    </fieldset>
+  );
+}
+
 function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
   const { id } = useParams();
   const eventId = parseRouteId(id);
@@ -1357,7 +1539,6 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     rarity: '1',
   });
   const [validated, setValidated] = useState(false);
-  const [dateError, setDateError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1376,19 +1557,28 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }, [data]);
 
+  const proposedDate: PartialDateValue = {
+    year: nullableNumber(draft.year),
+    month: nullableNumber(draft.month),
+    day: nullableNumber(draft.day),
+  };
+  const dateError = partialDateError(proposedDate, 'La data dell’evento');
+  const selectedEpoch = data?.[1].find(
+    (epoch) => epoch.id === Number(draft.epoch_id),
+  );
+  const dateConflict = selectedEpoch
+    ? eventEpochConflict(proposedDate, selectedEpoch)
+    : null;
+  const dateConflictMessage = dateConflict === 'before'
+    ? 'La data dell’evento è precedente all’inizio dell’epoca selezionata.'
+    : dateConflict === 'after'
+      ? 'La data dell’evento è successiva alla fine dell’epoca selezionata.'
+      : null;
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setValidated(true);
-    setDateError(null);
-    if (draft.month && !draft.year) {
-      setDateError('Il mese richiede anche l\'anno.');
-      return;
-    }
-    if (draft.day && !draft.month) {
-      setDateError('Il giorno richiede anche il mese.');
-      return;
-    }
-    if (!event.currentTarget.checkValidity()) return;
+    if (!event.currentTarget.checkValidity() || dateError || dateConflict) return;
     setSubmitError(null);
     try {
       const payload = {
@@ -1396,9 +1586,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
         description: cleanOptional(draft.description),
         place_id: Number(draft.place_id),
         epoch_id: Number(draft.epoch_id),
-        year: nullableNumber(draft.year),
-        month: nullableNumber(draft.month),
-        day: nullableNumber(draft.day),
+        ...proposedDate,
         rarity: Number(draft.rarity),
       };
       const saved = isEdit && eventId ? await api.updateEvent(eventId, payload) : await api.createEvent(payload);
@@ -1418,6 +1606,12 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     <EntityFormShell title={isEdit ? 'Modifica evento' : 'Nuovo evento'} backTo={cancelTo}>
       {submitError && <ErrorAlert message={submitError} />}
       {dateError && <ErrorAlert message={dateError} />}
+      {dateConflictMessage && (
+        <div className="alert alert-warning" role="alert">
+          <strong className="d-block mb-1">Data fuori dall’intervallo dell’epoca</strong>
+          {dateConflictMessage} Modifica la data o seleziona un’altra epoca.
+        </div>
+      )}
       {(places.length === 0 || epochs.length === 0) && (
         <div className="alert alert-warning">Per creare un evento servono almeno un luogo e un'epoca.</div>
       )}
@@ -1464,7 +1658,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
             <textarea className="form-control" id="description" rows={5} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
           </div>
         </div>
-        <FormActions cancelTo={cancelTo} />
+        <FormActions cancelTo={cancelTo} disabled={Boolean(dateError || dateConflict)} />
       </form>
     </EntityFormShell>
   );
@@ -1498,11 +1692,17 @@ function EntityFormShell({ title, backTo, children }: { title: string; backTo: s
   );
 }
 
-function FormActions({ cancelTo }: { cancelTo: string; }) {
+function FormActions({
+  cancelTo,
+  disabled = false,
+}: {
+  cancelTo: string;
+  disabled?: boolean;
+}) {
   return (
     <div className="d-flex justify-content-end gap-2 mt-4">
       <Link className="btn btn-outline-secondary" to={cancelTo}>Annulla</Link>
-      <button className="btn btn-primary" type="submit">
+      <button className="btn btn-primary" type="submit" disabled={disabled}>
         <i className="bi bi-check-lg me-2" />
         Salva
       </button>
@@ -1622,7 +1822,12 @@ function EpochDetail() {
   return (
     <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} media={media} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
-      <InfoGrid items={[['Rarità', String(epoch.rarity)], ['Eventi collegati', String(events.length)]]} />
+      <InfoGrid items={[
+        ['Data di inizio', formatPartialDate(epochStart(epoch), 'Non indicata')],
+        ['Data di fine', formatPartialDate(epochEnd(epoch), 'Non indicata')],
+        ['Rarità', String(epoch.rarity)],
+        ['Eventi collegati', String(events.length)],
+      ]} />
       <Description text={epoch.description} />
       <EventListSection title="Eventi in questa epoca" events={events} />
     </DetailShell>
@@ -1654,7 +1859,7 @@ function EventDetail() {
     <DetailShell title={event.title} entityType="event" entityId={event.id} media={media} onMediaChanged={reload} onDelete={remove}>
       <InfoGrid
         items={[
-          ['Data', formatDate(event)],
+          ['Data', formatPartialDate(event)],
           ['Luogo', event.place ? event.place.name : 'Non indicato'],
           ['Epoca', event.epoch ? event.epoch.name : 'Non indicata'],
           ['Rarità', String(event.rarity)],
@@ -2177,7 +2382,7 @@ function EventListSection({ title, events }: { title: string; events: Event[]; }
             <Link className="list-group-item list-group-item-action px-0" to={`/events/${event.id}`} key={event.id}>
               <div className="d-flex justify-content-between gap-3">
                 <span>{event.title}</span>
-                <span className="text-secondary small">{formatDate(event)}</span>
+                <span className="text-secondary small">{formatPartialDate(event)}</span>
               </div>
             </Link>
           ))}

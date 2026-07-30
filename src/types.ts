@@ -128,6 +128,12 @@ export interface Place extends Editable {
 export interface Epoch extends Editable {
   name: string;
   description?: string | null;
+  start_year?: number | null;
+  start_month?: number | null;
+  start_day?: number | null;
+  end_year?: number | null;
+  end_month?: number | null;
+  end_day?: number | null;
 }
 
 export interface Event extends Editable {

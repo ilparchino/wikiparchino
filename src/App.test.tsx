@@ -7,6 +7,7 @@ import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 import { COLOR_MODE_STORAGE_KEY } from './theme';
 import type {
   AdminUserDetail,
+  Epoch,
   Event,
   EventParticipant,
   MaintenanceStatus,
@@ -586,7 +587,15 @@ describe('App', () => {
       { id: 2, name: 'Parchino', description: null, ...metadata },
     ]);
     vi.spyOn(api, 'epochs').mockResolvedValue([
-      { id: 3, name: 'Post-Covid', description: 'Descrizione dell epoca', ...metadata },
+      {
+        id: 3,
+        name: 'Post-Covid',
+        description: 'Descrizione dell epoca',
+        start_year: 2020,
+        end_year: 2025,
+        end_month: 7,
+        ...metadata,
+      },
     ]);
     vi.spyOn(api, 'events').mockResolvedValue([
       {
@@ -624,7 +633,12 @@ describe('App', () => {
     }> = [
       { route: '#/people', label: 'Dino', subtitle: 'Nome Cognome', description: 'Descrizione della persona' },
       { route: '#/places', label: 'Parchino', subtitle: null, description: 'Nessuna descrizione' },
-      { route: '#/epochs', label: 'Post-Covid', subtitle: null, description: 'Descrizione dell epoca' },
+      {
+        route: '#/epochs',
+        label: 'Post-Covid',
+        subtitle: 'Dal 2020 al luglio 2025',
+        description: 'Descrizione dell epoca',
+      },
       {
         route: '#/events',
         label: 'APPoti APPiedi',
@@ -716,6 +730,123 @@ describe('App', () => {
     expect(screen.getByText('Luogo · Epoca · luglio 2025')).toBeInTheDocument();
     expect(screen.getByText('Luogo · Epoca · 14 luglio 2025')).toBeInTheDocument();
     expect(screen.getByText('Luogo · Epoca · Data sconosciuta')).toBeInTheDocument();
+  });
+
+  it('blocks an epoch edit that would exclude a linked event', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    const epoch = {
+      id: 30,
+      name: 'Epoca delimitata',
+      description: null,
+      start_year: 2020,
+      start_month: null,
+      start_day: null,
+      end_year: 2030,
+      end_month: null,
+      end_day: null,
+      ...metadata,
+    } as Epoch;
+    const linkedEvent = {
+      id: 31,
+      title: 'Evento collegato',
+      description: null,
+      place_id: 2,
+      epoch_id: epoch.id,
+      year: 2025,
+      month: 6,
+      day: null,
+      epoch,
+      ...metadata,
+    } as Event;
+    vi.spyOn(api, 'epoch').mockResolvedValue(epoch);
+    vi.spyOn(api, 'epochEvents').mockResolvedValue([linkedEvent]);
+    const updateEpoch = vi.spyOn(api, 'updateEpoch').mockResolvedValue(epoch);
+    window.location.hash = '#/epochs/30/edit';
+
+    render(<App />);
+
+    const startFields = await screen.findByRole('group', { name: 'Data di inizio' });
+    fireEvent.change(within(startFields).getByLabelText('Anno'), {
+      target: { value: '2026' },
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Evento collegato');
+    expect(screen.getByRole('button', { name: 'Salva' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Salva' }));
+    expect(updateEpoch).not.toHaveBeenCalled();
+
+    fireEvent.change(within(startFields).getByLabelText('Anno'), {
+      target: { value: '2025' },
+    });
+    expect(screen.queryByText(/Eventi fuori dall’intervallo proposto/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Salva' })).toBeEnabled();
+  });
+
+  it('warns and blocks an event definitely outside its selected epoch', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    const place = { id: 20, name: 'Luogo', description: null, ...metadata };
+    const epoch = {
+      id: 21,
+      name: 'Epoca 2025',
+      description: null,
+      start_year: 2025,
+      end_year: 2025,
+      ...metadata,
+    } as Epoch;
+    vi.spyOn(api, 'places').mockResolvedValue([place]);
+    vi.spyOn(api, 'epochs').mockResolvedValue([epoch]);
+    const savedEvent = {
+      id: 40,
+      title: 'Evento nuovo',
+      description: null,
+      place_id: place.id,
+      epoch_id: epoch.id,
+      year: 2025,
+      month: null,
+      day: null,
+      place,
+      epoch,
+      ...metadata,
+    } as Event;
+    const createEvent = vi.spyOn(api, 'createEvent').mockResolvedValue(savedEvent);
+    vi.spyOn(api, 'event').mockResolvedValue(savedEvent);
+    vi.spyOn(api, 'eventParticipants').mockResolvedValue([]);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    window.location.hash = '#/events/new';
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Nuovo evento' });
+    fireEvent.change(screen.getByLabelText(/Titolo/), { target: { value: 'Evento nuovo' } });
+    fireEvent.change(screen.getByLabelText(/Luogo/), { target: { value: String(place.id) } });
+    fireEvent.change(screen.getByLabelText(/Epoca/), { target: { value: String(epoch.id) } });
+    fireEvent.change(screen.getByLabelText('Anno'), { target: { value: '2024' } });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'precedente all’inizio dell’epoca selezionata',
+    );
+    expect(screen.getByRole('button', { name: 'Salva' })).toBeDisabled();
+    expect(createEvent).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Anno'), { target: { value: '2025' } });
+    expect(screen.queryByText(/Data fuori dall’intervallo dell’epoca/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Salva' }));
+    await waitFor(() => expect(createEvent).toHaveBeenCalledWith(expect.objectContaining({
+      epoch_id: epoch.id,
+      year: 2025,
+    })));
   });
 
   it('shows the image placeholder when a listed entity has no media', async () => {
