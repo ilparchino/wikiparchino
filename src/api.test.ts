@@ -161,6 +161,30 @@ describe('api client', () => {
     );
   });
 
+  it('uses the cerchia CRUD and independent membership contracts', async () => {
+    setAccessToken('group-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify([]))),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.groups();
+    await api.replaceGroupPeople(12, [1, 2]);
+    await api.replaceGroupEpochs(12, [3]);
+    await api.personGroups(1);
+    await api.epochGroups(3);
+
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('/api/groups'),
+      expect.stringContaining('/api/groups/12/people'),
+      expect.stringContaining('/api/groups/12/epochs'),
+      expect.stringContaining('/api/people/1/groups'),
+      expect.stringContaining('/api/epochs/3/groups'),
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ person_ids: [1, 2] });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ epoch_ids: [3] });
+  });
+
   it('changes the password without clearing the current token', async () => {
     setAccessToken('current-session');
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>

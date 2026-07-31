@@ -1,4 +1,4 @@
-export type EntityType = 'person' | 'place' | 'event' | 'epoch';
+export type EntityType = 'person' | 'place' | 'event' | 'epoch' | 'group';
 export type Sex = 'male' | 'female' | 'other' | 'unknown';
 export type Connotation = 'positive' | 'negative' | 'neutral' | 'unknown';
 
@@ -85,6 +85,7 @@ export interface AdminSummary {
   places: number;
   epochs: number;
   events: number;
+  groups: number;
   media: number;
   activity_last_24h: number;
 }
@@ -122,6 +123,7 @@ export interface Person extends Editable {
 
 export interface Place extends Editable {
   name: string;
+  address?: string | null;
   description?: string | null;
 }
 
@@ -146,6 +148,16 @@ export interface Event extends Editable {
   day?: number | null;
   place?: Place | null;
   epoch?: Epoch | null;
+}
+
+export interface Group extends Editable {
+  name: string;
+  description?: string | null;
+}
+
+export interface GroupSummary extends Group {
+  people_count: number;
+  epoch_count: number;
 }
 
 export interface SearchResult {

@@ -1,6 +1,6 @@
 # Wiki Parchino Frontend
 
-The browser interface for Wiki Parchino, a private knowledge base for the Parchino friend group. The application provides an Italian, responsive UI for browsing and editing people, places, epochs, events, relationships, and media, together with search and pull activities.
+The browser interface for Wiki Parchino, a private knowledge base for the Parchino friend group. The application provides an Italian, responsive UI for browsing and editing people, places, epochs, events, social groups ("Cerchie"), relationships, and media, together with search and pull activities.
 
 The FastAPI backend is maintained as a separate repository and is required for authentication and all application data.
 
@@ -17,6 +17,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 - Routed list, detail, create, and edit views for every entity type.
 - Content-focused detail headers that keep internal numeric identifiers out of page text.
 - Relationship editing from entity detail pages.
+- Independent people and epoch membership management for Cerchie, with reciprocal links on related details.
 - Authenticated image upload, display, deletion, and fixed list previews.
 - Cross-entity search.
 - Weighted random lottery and item-of-the-day activity.

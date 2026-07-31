@@ -18,6 +18,7 @@ const contentPaths: Record<EntityType, string> = {
   place: '/places',
   epoch: '/epochs',
   event: '/events',
+  group: '/groups',
 };
 
 const actionLabels: Record<string, string> = {
@@ -26,6 +27,8 @@ const actionLabels: Record<string, string> = {
   delete: 'Eliminazione contenuto',
   replace_participants: 'Partecipanti aggiornati',
   replace_places: 'Luoghi collegati aggiornati',
+  replace_group_people: 'Persone della cerchia aggiornate',
+  replace_group_epochs: 'Epoche della cerchia aggiornate',
   upload_media: 'Immagine caricata',
   delete_media: 'Immagine eliminata',
   user_created: 'Utente creato',
@@ -137,6 +140,7 @@ export function AdminDashboard() {
     ['Luoghi', summary.places, 'bi-geo-alt'],
     ['Epoche', summary.epochs, 'bi-hourglass-split'],
     ['Eventi', summary.events, 'bi-calendar-event'],
+    ['Cerchie', summary.groups, 'bi-diagram-3'],
     ['Immagini', summary.media, 'bi-images'],
     ['Attività 24h', summary.activity_last_24h, 'bi-activity'],
   ] as const;

@@ -39,6 +39,8 @@ import type {
   Epoch,
   Event,
   EventParticipant,
+  Group,
+  GroupSummary,
   MediaAsset,
   MaintenanceStatus,
   Person,
@@ -58,6 +60,7 @@ const entityLabels: Record<EntityType, string> = {
   place: 'Luogo',
   epoch: 'Epoca',
   event: 'Evento',
+  group: 'Cerchia',
 };
 
 const entityPluralLabels: Record<EntityType, string> = {
@@ -65,6 +68,7 @@ const entityPluralLabels: Record<EntityType, string> = {
   place: 'Luoghi',
   epoch: 'Epoche',
   event: 'Eventi',
+  group: 'Cerchie',
 };
 
 const entityPaths: Record<EntityType, string> = {
@@ -72,6 +76,7 @@ const entityPaths: Record<EntityType, string> = {
   place: '/places',
   epoch: '/epochs',
   event: '/events',
+  group: '/groups',
 };
 
 const sexLabels: Record<Sex, string> = {
@@ -530,6 +535,7 @@ function AuthenticatedApp({
               <NavItem to="/people" label="Persone" icon="bi-people" onClick={closeNavigation} />
               <NavItem to="/places" label="Luoghi" icon="bi-geo-alt" onClick={closeNavigation} />
               <NavItem to="/epochs" label="Epoche" icon="bi-hourglass-split" onClick={closeNavigation} />
+              <NavItem to="/groups" label="Cerchie" icon="bi-diagram-3" onClick={closeNavigation} />
               <NavItem to="/events" label="Eventi" icon="bi-calendar-event" onClick={closeNavigation} />
               <NavItem to="/search" label="Cerca" icon="bi-search" onClick={closeNavigation} />
               <NavItem to="/pulls" label="Estrazioni" icon="bi-shuffle" onClick={closeNavigation} />
@@ -619,6 +625,10 @@ function AuthenticatedApp({
           <Route path="/events/new" element={<EventForm mode="create" />} />
           <Route path="/events/:id" element={<EventDetail />} />
           <Route path="/events/:id/edit" element={<EventForm mode="edit" />} />
+          <Route path="/groups" element={<GroupsList />} />
+          <Route path="/groups/new" element={<GroupForm mode="create" />} />
+          <Route path="/groups/:id" element={<GroupDetail />} />
+          <Route path="/groups/:id/edit" element={<GroupForm mode="edit" />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/pulls" element={<PullsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -793,7 +803,7 @@ function NavItem({
 
 function Dashboard() {
   const { data, loading, error } = useAsync(
-    () => Promise.all([api.people(), api.places(), api.epochs(), api.events(), api.dailyPull()]),
+    () => Promise.all([api.people(), api.places(), api.epochs(), api.events(), api.groups(), api.dailyPull()]),
     [],
   );
 
@@ -801,7 +811,7 @@ function Dashboard() {
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
-  const [people, places, epochs, events, daily] = data;
+  const [people, places, epochs, events, groups, daily] = data;
   return (
     <section>
       <div className="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-4">
@@ -819,6 +829,7 @@ function Dashboard() {
         <MetricCard label="Luoghi" value={places.length} to="/places" icon="bi-geo-alt" />
         <MetricCard label="Epoche" value={epochs.length} to="/epochs" icon="bi-hourglass-split" />
         <MetricCard label="Eventi" value={events.length} to="/events" icon="bi-calendar-event" />
+        <MetricCard label="Cerchie" value={groups.length} to="/groups" icon="bi-diagram-3" />
       </div>
       <div className="row g-4">
         <div className="col-lg-5">
@@ -979,11 +990,21 @@ function PlacesList() {
   const { data, loading, error } = useAsync(() => loadEntityList(api.places), []);
   const filtered = useMemo(() => {
     const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((place) => [place.name, place.description].some((value) => (value ?? '').toLowerCase().includes(term)));
+    return (data?.items ?? []).filter((place) =>
+      [place.name, place.address, place.description].some((value) =>
+        (value ?? '').toLowerCase().includes(term),
+      ),
+    );
   }, [data, filter]);
 
   return (
-    <ListPage title="Luoghi" createTo="/places/new" filter={filter} onFilter={setFilter}>
+    <ListPage
+      title="Luoghi"
+      createTo="/places/new"
+      filter={filter}
+      filterPlaceholder="Filtra per nome, indirizzo o descrizione"
+      onFilter={setFilter}
+    >
       {loading && <Loading />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
@@ -992,6 +1013,7 @@ function PlacesList() {
         previews={data?.previews}
         entityType="place"
         titleFor={(place) => place.name}
+        subtitleFor={(place) => place.address}
         descriptionFor={(place) => place.description}
       />
     </ListPage>
@@ -1050,16 +1072,53 @@ function EventsList() {
   );
 }
 
+function groupCountSubtitle(group: GroupSummary): string {
+  const people = `${group.people_count} ${group.people_count === 1 ? 'persona' : 'persone'}`;
+  const epochs = `${group.epoch_count} ${group.epoch_count === 1 ? 'epoca' : 'epoche'}`;
+  return `${people} · ${epochs}`;
+}
+
+function GroupsList() {
+  const [filter, setFilter] = useState('');
+  const { data, loading, error } = useAsync(() => loadEntityList(api.groups), []);
+  const filtered = useMemo(() => {
+    const term = filter.toLowerCase();
+    return (data?.items ?? []).filter((group) =>
+      [group.name, group.description].some((value) =>
+        (value ?? '').toLowerCase().includes(term),
+      ),
+    );
+  }, [data, filter]);
+
+  return (
+    <ListPage title="Cerchie" createTo="/groups/new" filter={filter} onFilter={setFilter}>
+      {loading && <Loading />}
+      {error && <ErrorAlert message={error} />}
+      {!loading && filtered.length === 0 && <EmptyState>Nessuna cerchia trovata.</EmptyState>}
+      <EntityList
+        items={filtered}
+        previews={data?.previews}
+        entityType="group"
+        titleFor={(group) => group.name}
+        subtitleFor={groupCountSubtitle}
+        descriptionFor={(group) => group.description}
+      />
+    </ListPage>
+  );
+}
+
 function ListPage({
   title,
   createTo,
   filter,
+  filterPlaceholder = 'Filtra per nome o descrizione',
   onFilter,
   children,
 }: {
   title: string;
   createTo: string;
   filter: string;
+  filterPlaceholder?: string;
   onFilter: (value: string) => void;
   children: ReactNode;
 }) {
@@ -1083,7 +1142,7 @@ function ListPage({
           className="form-control"
           value={filter}
           onChange={(event) => onFilter(event.target.value)}
-          placeholder="Filtra per nome o descrizione"
+          placeholder={filterPlaceholder}
         />
       </div>
       {children}
@@ -1396,20 +1455,27 @@ function NamedEntityForm({
 }: {
   mode: 'create' | 'edit';
   load: (id: number) => Promise<Place>;
-  create: (payload: { name: string; description: string | null; rarity: number; }) => Promise<Place>;
-  update: (id: number, payload: { name: string; description: string | null; rarity: number; }) => Promise<Place>;
+  create: (payload: { name: string; address: string | null; description: string | null; rarity: number; }) => Promise<Place>;
+  update: (id: number, payload: { name: string; address: string | null; description: string | null; rarity: number; }) => Promise<Place>;
 }) {
   const { id } = useParams();
   const entityId = parseRouteId(id);
   const navigate = useNavigate();
   const isEdit = mode === 'edit';
   const { data, loading, error } = useAsync(() => (isEdit && entityId ? load(entityId) : Promise.resolve(null)), [mode, entityId]);
-  const [draft, setDraft] = useState({ name: '', description: '', rarity: '1' });
+  const [draft, setDraft] = useState({ name: '', address: '', description: '', rarity: '1' });
   const [validated, setValidated] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (data) setDraft({ name: data.name, description: data.description ?? '', rarity: String(data.rarity) });
+    if (data) {
+      setDraft({
+        name: data.name,
+        address: data.address ?? '',
+        description: data.description ?? '',
+        rarity: String(data.rarity),
+      });
+    }
   }, [data]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -1418,7 +1484,12 @@ function NamedEntityForm({
     if (!event.currentTarget.checkValidity()) return;
     setSubmitError(null);
     try {
-      const payload = { name: draft.name.trim(), description: cleanOptional(draft.description), rarity: Number(draft.rarity) };
+      const payload = {
+        name: draft.name.trim(),
+        address: cleanOptional(draft.address),
+        description: cleanOptional(draft.description),
+        rarity: Number(draft.rarity),
+      };
       const saved = isEdit && entityId ? await update(entityId, payload) : await create(payload);
       navigate(`/places/${saved.id}`);
     } catch (err) {
@@ -1445,8 +1516,103 @@ function NamedEntityForm({
             <RarityInput value={draft.rarity} onChange={(rarity) => setDraft({ ...draft, rarity })} />
           </div>
           <div className="col-12">
+            <label className="form-label" htmlFor="address">Indirizzo</label>
+            <input
+              className="form-control"
+              id="address"
+              maxLength={500}
+              value={draft.address}
+              onChange={(event) => setDraft({ ...draft, address: event.target.value })}
+              placeholder="Es. Via Roma 10, Torino"
+            />
+          </div>
+          <div className="col-12">
             <label className="form-label" htmlFor="description">Descrizione</label>
             <textarea className="form-control" id="description" rows={5} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          </div>
+        </div>
+        <FormActions cancelTo={cancelTo} />
+      </form>
+    </EntityFormShell>
+  );
+}
+
+function GroupForm({ mode }: { mode: 'create' | 'edit'; }) {
+  const { id } = useParams();
+  const groupId = parseRouteId(id);
+  const navigate = useNavigate();
+  const isEdit = mode === 'edit';
+  const { data, loading, error } = useAsync(
+    () => (isEdit && groupId ? api.group(groupId) : Promise.resolve(null)),
+    [mode, groupId],
+  );
+  const [draft, setDraft] = useState({ name: '', description: '', rarity: '1' });
+  const [validated, setValidated] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (data) {
+      setDraft({
+        name: data.name,
+        description: data.description ?? '',
+        rarity: String(data.rarity),
+      });
+    }
+  }, [data]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setValidated(true);
+    if (!event.currentTarget.checkValidity()) return;
+    setSubmitError(null);
+    try {
+      const payload = {
+        name: draft.name.trim(),
+        description: cleanOptional(draft.description),
+        rarity: Number(draft.rarity),
+      };
+      const saved = isEdit && groupId
+        ? await api.updateGroup(groupId, payload)
+        : await api.createGroup(payload);
+      navigate(`/groups/${saved.id}`);
+    } catch (err) {
+      setSubmitError(formatError(err, 'Non è stato possibile salvare la cerchia.'));
+    }
+  }
+
+  if (loading) return <Loading />;
+  if (error) return <ErrorAlert message={error} />;
+
+  const cancelTo = isEdit && groupId ? `/groups/${groupId}` : '/groups';
+  return (
+    <EntityFormShell title={isEdit ? 'Modifica cerchia' : 'Nuova cerchia'} backTo={cancelTo}>
+      {submitError && <ErrorAlert message={submitError} />}
+      <form className={validated ? 'was-validated' : ''} noValidate onSubmit={submit}>
+        <div className="row g-3">
+          <div className="col-md-8">
+            <label className="form-label" htmlFor="group-name">Nome<RequiredMark /></label>
+            <input
+              className="form-control"
+              id="group-name"
+              maxLength={255}
+              required
+              value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+            <div className="invalid-feedback">Inserisci un nome.</div>
+          </div>
+          <div className="col-md-4">
+            <RarityInput value={draft.rarity} onChange={(rarity) => setDraft({ ...draft, rarity })} />
+          </div>
+          <div className="col-12">
+            <label className="form-label" htmlFor="group-description">Descrizione</label>
+            <textarea
+              className="form-control"
+              id="group-description"
+              rows={5}
+              value={draft.description}
+              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+            />
           </div>
         </div>
         <FormActions cancelTo={cancelTo} />
@@ -1717,7 +1883,13 @@ function PersonDetail() {
   const { data, loading, error, reload } = useAsync(
     () =>
       parsedPersonId
-        ? Promise.all([api.person(personId), api.personPlaces(personId), api.personEvents(personId), api.media(personId)])
+        ? Promise.all([
+            api.person(personId),
+            api.personPlaces(personId),
+            api.personEvents(personId),
+            api.personGroups(personId),
+            api.media(personId),
+          ])
         : Promise.resolve(null),
     [personId, parsedPersonId],
   );
@@ -1732,7 +1904,7 @@ function PersonDetail() {
   if (loading) return <Loading />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [person, places, events, media] = data;
+  const [person, places, events, groups, media] = data;
 
   return (
     <DetailShell title={person.alias} entityType="person" entityId={person.id} media={media} onMediaChanged={reload} onDelete={remove}>
@@ -1747,6 +1919,7 @@ function PersonDetail() {
       <Description text={person.description} />
       <PersonPlacesEditor personId={person.id} initialLinks={places} />
       <LinkedEvents events={events} />
+      <LinkedGroups groups={groups} />
     </DetailShell>
   );
 }
@@ -1784,7 +1957,14 @@ function PlaceDetail() {
   return (
     <DetailShell title={place.name} entityType="place" entityId={place.id} media={media} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
-      <InfoGrid items={[['Rarità', String(place.rarity)], ['Eventi collegati', String(events.length)], ['Persone collegate', String(people.length)]]} />
+      <InfoGrid
+        items={[
+          ['Indirizzo', place.address || 'Non indicato'],
+          ['Rarità', String(place.rarity)],
+          ['Eventi collegati', String(events.length)],
+          ['Persone collegate', String(people.length)],
+        ]}
+      />
       <Description text={place.description} />
       <LinkedPeople links={people} />
       <EventListSection title="Eventi in questo luogo" events={events} />
@@ -1798,7 +1978,12 @@ function EpochDetail() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { data, loading, error, reload } = useAsync(
-    () => (parsedEpochId ? Promise.all([api.epoch(epochId), api.epochEvents(epochId), api.media(epochId)]) : Promise.resolve(null)),
+    () => (parsedEpochId ? Promise.all([
+      api.epoch(epochId),
+      api.epochEvents(epochId),
+      api.epochGroups(epochId),
+      api.media(epochId),
+    ]) : Promise.resolve(null)),
     [epochId, parsedEpochId],
   );
 
@@ -1817,7 +2002,7 @@ function EpochDetail() {
   if (loading) return <Loading />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [epoch, events, media] = data;
+  const [epoch, events, groups, media] = data;
 
   return (
     <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} media={media} onMediaChanged={reload} onDelete={remove}>
@@ -1830,6 +2015,7 @@ function EpochDetail() {
       ]} />
       <Description text={epoch.description} />
       <EventListSection title="Eventi in questa epoca" events={events} />
+      <LinkedGroups groups={groups} />
     </DetailShell>
   );
 }
@@ -1871,6 +2057,69 @@ function EventDetail() {
       </div>
       <Description text={event.description} />
       <EventParticipantsEditor eventId={event.id} initialParticipants={participants} />
+    </DetailShell>
+  );
+}
+
+function GroupDetail() {
+  const parsedGroupId = parseRouteId(useParams().id);
+  const groupId = parsedGroupId ?? 0;
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [peopleCount, setPeopleCount] = useState<number | null>(null);
+  const [epochCount, setEpochCount] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const { data, loading, error, reload } = useAsync(
+    () => (parsedGroupId ? Promise.all([
+      api.group(groupId),
+      api.groupPeople(groupId),
+      api.groupEpochs(groupId),
+      api.media(groupId),
+    ]) : Promise.resolve(null)),
+    [groupId, parsedGroupId],
+  );
+
+  useEffect(() => {
+    if (data) {
+      setPeopleCount(data[1].length);
+      setEpochCount(data[2].length);
+    }
+  }, [data]);
+
+  async function remove() {
+    if (!window.confirm('Eliminare definitivamente questa cerchia?')) return;
+    setDeleteError(null);
+    try {
+      await api.deleteGroup(groupId);
+      navigate('/groups');
+    } catch (err) {
+      setDeleteError(formatError(err, 'Non è stato possibile eliminare la cerchia.'));
+    }
+  }
+
+  if (!parsedGroupId) return <ErrorAlert message="Cerchia non valida." />;
+  if (loading) return <Loading />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+  const [group, people, epochs, media] = data;
+
+  return (
+    <DetailShell
+      title={group.name}
+      entityType="group"
+      entityId={group.id}
+      media={media}
+      onMediaChanged={reload}
+      onDelete={remove}
+    >
+      {deleteError && <ErrorAlert message={deleteError} />}
+      <InfoGrid items={[
+        ['Rarità', String(group.rarity)],
+        ['Persone collegate', String(peopleCount ?? people.length)],
+        ['Epoche collegate', String(epochCount ?? epochs.length)],
+      ]} />
+      <Description text={group.description} />
+      <GroupPeopleEditor groupId={group.id} initialPeople={people} onSaved={setPeopleCount} />
+      <GroupEpochsEditor groupId={group.id} initialEpochs={epochs} onSaved={setEpochCount} />
     </DetailShell>
   );
 }
@@ -2261,6 +2510,168 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
   );
 }
 
+function GroupPeopleEditor({
+  groupId,
+  initialPeople,
+  onSaved,
+}: {
+  groupId: number;
+  initialPeople: Person[];
+  onSaved: (count: number) => void;
+}) {
+  const { data: people, loading, error } = useAsync(api.people, []);
+  const [rows, setRows] = useState(() => initialPeople.map((person) => String(person.id)));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setRows(initialPeople.map((person) => String(person.id)));
+  }, [initialPeople]);
+
+  async function save() {
+    const ids = rows.filter(Boolean);
+    if (new Set(ids).size !== ids.length) {
+      setSaveError('Ogni persona può comparire una sola volta.');
+      setSaved(false);
+      return;
+    }
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const updated = await api.replaceGroupPeople(groupId, ids.map(Number));
+      setRows(updated.map((person) => String(person.id)));
+      onSaved(updated.length);
+      setSaved(true);
+    } catch (err) {
+      setSaveError(formatError(err, 'Non è stato possibile salvare le persone della cerchia.'));
+    }
+  }
+
+  return (
+    <section className="border rounded bg-body p-4">
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h2 className="h5 mb-0">Persone della cerchia</h2>
+        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, ''])}>
+          <i className="bi bi-plus-lg me-1" />
+          Aggiungi
+        </button>
+      </div>
+      {loading && <Loading />}
+      {error && <ErrorAlert message={error} />}
+      {saveError && <ErrorAlert message={saveError} />}
+      {saved && <div className="alert alert-success">Persone della cerchia salvate.</div>}
+      {people && (
+        <>
+          {rows.length === 0 && <p className="text-secondary">Nessuna persona collegata.</p>}
+          {rows.map((personId, index) => (
+            <div className="row g-2 align-items-end mb-2" key={index}>
+              <div className="col-md-11">
+                <label className="form-label" htmlFor={`group-person-${index}`}>Persona</label>
+                <select
+                  className="form-select"
+                  id={`group-person-${index}`}
+                  value={personId}
+                  onChange={(event) => setRows(rows.map((value, rowIndex) => rowIndex === index ? event.target.value : value))}
+                >
+                  <option value="">Scegli persona</option>
+                  {people.map((person) => <option value={person.id} key={person.id}>{person.alias}</option>)}
+                </select>
+              </div>
+              <div className="col-md-1">
+                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Rimuovi persona dalla cerchia">
+                  <i className="bi bi-x-lg" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva persone</button>
+        </>
+      )}
+    </section>
+  );
+}
+
+function GroupEpochsEditor({
+  groupId,
+  initialEpochs,
+  onSaved,
+}: {
+  groupId: number;
+  initialEpochs: Epoch[];
+  onSaved: (count: number) => void;
+}) {
+  const { data: epochs, loading, error } = useAsync(api.epochs, []);
+  const [rows, setRows] = useState(() => initialEpochs.map((epoch) => String(epoch.id)));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setRows(initialEpochs.map((epoch) => String(epoch.id)));
+  }, [initialEpochs]);
+
+  async function save() {
+    const ids = rows.filter(Boolean);
+    if (new Set(ids).size !== ids.length) {
+      setSaveError('Ogni epoca può comparire una sola volta.');
+      setSaved(false);
+      return;
+    }
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const updated = await api.replaceGroupEpochs(groupId, ids.map(Number));
+      setRows(updated.map((epoch) => String(epoch.id)));
+      onSaved(updated.length);
+      setSaved(true);
+    } catch (err) {
+      setSaveError(formatError(err, 'Non è stato possibile salvare le epoche della cerchia.'));
+    }
+  }
+
+  return (
+    <section className="border rounded bg-body p-4">
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h2 className="h5 mb-0">Epoche della cerchia</h2>
+        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, ''])}>
+          <i className="bi bi-plus-lg me-1" />
+          Aggiungi
+        </button>
+      </div>
+      {loading && <Loading />}
+      {error && <ErrorAlert message={error} />}
+      {saveError && <ErrorAlert message={saveError} />}
+      {saved && <div className="alert alert-success">Epoche della cerchia salvate.</div>}
+      {epochs && (
+        <>
+          {rows.length === 0 && <p className="text-secondary">Nessuna epoca collegata.</p>}
+          {rows.map((epochId, index) => (
+            <div className="row g-2 align-items-end mb-2" key={index}>
+              <div className="col-md-11">
+                <label className="form-label" htmlFor={`group-epoch-${index}`}>Epoca</label>
+                <select
+                  className="form-select"
+                  id={`group-epoch-${index}`}
+                  value={epochId}
+                  onChange={(event) => setRows(rows.map((value, rowIndex) => rowIndex === index ? event.target.value : value))}
+                >
+                  <option value="">Scegli epoca</option>
+                  {epochs.map((epoch) => <option value={epoch.id} key={epoch.id}>{epoch.name}</option>)}
+                </select>
+              </div>
+              <div className="col-md-1">
+                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Rimuovi epoca dalla cerchia">
+                  <i className="bi bi-x-lg" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva epoche</button>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function EventParticipantsEditor({ eventId, initialParticipants }: { eventId: number; initialParticipants: EventParticipant[]; }) {
   const { data: people, loading, error } = useAsync(api.people, []);
   const [rows, setRows] = useState(() => initialParticipants.map((link) => ({ person_id: String(link.person_id), role: link.role ?? '', motivation: link.motivation ?? '' })));
@@ -2354,6 +2765,23 @@ export function LinkedEvents({ events }: { events: PersonEvent[]; }) {
   );
 }
 
+function LinkedGroups({ groups }: { groups: Group[]; }) {
+  return (
+    <section className="border rounded bg-body p-4">
+      <h2 className="h5">Cerchie</h2>
+      {groups.length === 0 ? <p className="text-secondary mb-0">Nessuna cerchia collegata.</p> : (
+        <div className="list-group list-group-flush">
+          {groups.map((group) => (
+            <Link className="list-group-item list-group-item-action px-0" to={`/groups/${group.id}`} key={group.id}>
+              <span className="fw-semibold">{group.name}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function LinkedPeople({ links }: { links: PlacePerson[]; }) {
   return (
     <section className="border rounded bg-body p-4">
@@ -2416,7 +2844,7 @@ function SearchPage() {
     <section>
       <h1 className="h2 mb-4">Cerca</h1>
       <form className="input-group mb-4" onSubmit={submit}>
-        <input className="form-control" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca persone, luoghi, epoche, eventi" />
+        <input className="form-control" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca persone, luoghi, epoche, eventi e cerchie" />
         <button className="btn btn-primary" type="submit">
           <i className="bi bi-search me-2" />
           Cerca

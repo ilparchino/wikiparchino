@@ -9,6 +9,8 @@ import type {
   EntityType,
   Epoch,
   Event,
+  Group,
+  GroupSummary,
   EventParticipant,
   EventParticipantInput,
   LoginResponse,
@@ -240,6 +242,14 @@ export const api = {
     request<Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteEvent: (id: number) => request<void>(`/api/events/${id}`, { method: 'DELETE' }),
 
+  groups: () => request<GroupSummary[]>('/api/groups'),
+  group: (id: number) => request<Group>(`/api/groups/${id}`),
+  createGroup: (payload: EntityPayload<Group>) =>
+    request<Group>('/api/groups', { method: 'POST', body: JSON.stringify(payload) }),
+  updateGroup: (id: number, payload: EntityPayload<Group>) =>
+    request<Group>(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteGroup: (id: number) => request<void>(`/api/groups/${id}`, { method: 'DELETE' }),
+
   search: (query: string) => request<SearchResult[]>(`/api/search?q=${encodeURIComponent(query)}`),
   randomPull: (entityType?: EntityType) =>
     request<PullResult>(`/api/pulls/random${entityType ? `?entity_type=${entityType}` : ''}`),
@@ -262,6 +272,20 @@ export const api = {
   placePeople: (placeId: number) => request<PlacePerson[]>(`/api/places/${placeId}/people`),
   placeEvents: (placeId: number) => request<Event[]>(`/api/places/${placeId}/events`),
   epochEvents: (epochId: number) => request<Event[]>(`/api/epochs/${epochId}/events`),
+  groupPeople: (groupId: number) => request<Person[]>(`/api/groups/${groupId}/people`),
+  replaceGroupPeople: (groupId: number, personIds: number[]) =>
+    request<Person[]>(`/api/groups/${groupId}/people`, {
+      method: 'PUT',
+      body: JSON.stringify({ person_ids: personIds }),
+    }),
+  groupEpochs: (groupId: number) => request<Epoch[]>(`/api/groups/${groupId}/epochs`),
+  replaceGroupEpochs: (groupId: number, epochIds: number[]) =>
+    request<Epoch[]>(`/api/groups/${groupId}/epochs`, {
+      method: 'PUT',
+      body: JSON.stringify({ epoch_ids: epochIds }),
+    }),
+  personGroups: (personId: number) => request<Group[]>(`/api/people/${personId}/groups`),
+  epochGroups: (epochId: number) => request<Group[]>(`/api/epochs/${epochId}/groups`),
 
   media: (pullableId: number) => request<MediaAsset[]>(`/api/media?pullable_id=${pullableId}`),
   mediaPreviews: (pullableIds: number[]) => {

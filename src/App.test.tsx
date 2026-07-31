@@ -10,10 +10,13 @@ import type {
   Epoch,
   Event,
   EventParticipant,
+  Group,
+  GroupSummary,
   MaintenanceStatus,
   MediaAsset,
   Person,
   PersonEvent,
+  Place,
 } from './types';
 
 const user = {
@@ -97,6 +100,7 @@ describe('App', () => {
         if (url.endsWith('/api/places')) return json([]);
         if (url.endsWith('/api/epochs')) return json([]);
         if (url.endsWith('/api/events')) return json([]);
+        if (url.endsWith('/api/groups')) return json([]);
         if (url.includes('/api/pulls/daily')) {
           return json({ entity_type: 'event', id: 1, title: 'Elemento demo', rarity: 1, mode: 'daily' });
         }
@@ -161,7 +165,7 @@ describe('App', () => {
   it('renders administrator metrics, users, and recent activity', async () => {
     vi.spyOn(api, 'adminSummary').mockResolvedValue({
       total_users: 2, active_users: 1, inactive_users: 1, admin_users: 1,
-      active_sessions: 3, people: 3, places: 2, epochs: 1, events: 1, media: 4,
+      active_sessions: 3, people: 3, places: 2, epochs: 1, events: 1, groups: 2, media: 4,
       activity_last_24h: 6,
     });
     vi.spyOn(api, 'adminUsers').mockResolvedValue([{
@@ -584,7 +588,7 @@ describe('App', () => {
       } as Person,
     ]);
     vi.spyOn(api, 'places').mockResolvedValue([
-      { id: 2, name: 'Parchino', description: null, ...metadata },
+      { id: 2, name: 'Parchino', address: 'Via Dimostrativa #2', description: null, ...metadata },
     ]);
     vi.spyOn(api, 'epochs').mockResolvedValue([
       {
@@ -607,10 +611,20 @@ describe('App', () => {
         year: 2025,
         month: 7,
         day: null,
-        place: { id: 2, name: 'Parchino', description: null, ...metadata },
+        place: { id: 2, name: 'Parchino', address: 'Via Dimostrativa #2', description: null, ...metadata },
         epoch: { id: 3, name: 'Post-Covid', description: null, ...metadata },
         ...metadata,
       } as Event,
+    ]);
+    vi.spyOn(api, 'groups').mockResolvedValue([
+      {
+        id: 5,
+        name: 'Cerchia Demo',
+        description: 'Descrizione della cerchia',
+        people_count: 1,
+        epoch_count: 2,
+        ...metadata,
+      } as GroupSummary,
     ]);
     vi.spyOn(api, 'mediaPreviews').mockImplementation(async (ids) =>
       ids.map((id) => ({
@@ -632,7 +646,7 @@ describe('App', () => {
       description: string;
     }> = [
       { route: '#/people', label: 'Dino', subtitle: 'Nome Cognome', description: 'Descrizione della persona' },
-      { route: '#/places', label: 'Parchino', subtitle: null, description: 'Nessuna descrizione' },
+      { route: '#/places', label: 'Parchino', subtitle: 'Via Dimostrativa #2', description: 'Nessuna descrizione' },
       {
         route: '#/epochs',
         label: 'Post-Covid',
@@ -644,6 +658,12 @@ describe('App', () => {
         label: 'APPoti APPiedi',
         subtitle: 'Parchino · Post-Covid · luglio 2025',
         description: 'Descrizione dell evento',
+      },
+      {
+        route: '#/groups',
+        label: 'Cerchia Demo',
+        subtitle: '1 persona · 2 epoche',
+        description: 'Descrizione della cerchia',
       },
     ];
 
@@ -667,6 +687,239 @@ describe('App', () => {
       expect(screen.queryByText('non-visibile.png')).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  it('filters places by address and omits the subtitle when an address is absent', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    vi.spyOn(api, 'places').mockResolvedValue([
+      {
+        id: 1,
+        name: 'Luogo con indirizzo',
+        address: 'Via Dimostrativa 10, Torino',
+        description: 'Primo luogo',
+        ...metadata,
+      },
+      {
+        id: 2,
+        name: 'Luogo senza indirizzo',
+        address: null,
+        description: 'Secondo luogo',
+        ...metadata,
+      },
+    ]);
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    window.location.hash = '#/places';
+
+    render(<App />);
+
+    const addressedCard = (await screen.findByText('Luogo con indirizzo')).closest('.entity-card') as HTMLElement;
+    expect(within(addressedCard).getByText('Via Dimostrativa 10, Torino')).toHaveClass('entity-card-subtitle');
+    const unaddressedCard = screen.getByText('Luogo senza indirizzo').closest('.entity-card') as HTMLElement;
+    expect(unaddressedCard.querySelector('.entity-card-subtitle')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Filtra per nome, indirizzo o descrizione'), {
+      target: { value: 'torino' },
+    });
+    expect(screen.getByText('Luogo con indirizzo')).toBeInTheDocument();
+    expect(screen.queryByText('Luogo senza indirizzo')).not.toBeInTheDocument();
+  });
+
+  it('submits a blank optional address as null from the place form', async () => {
+    const savedPlace = {
+      id: 50,
+      name: 'Luogo nuovo',
+      address: null,
+      description: null,
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    } as Place;
+    const createPlace = vi.spyOn(api, 'createPlace').mockResolvedValue(savedPlace);
+    vi.spyOn(api, 'place').mockResolvedValue(savedPlace);
+    vi.spyOn(api, 'placePeople').mockResolvedValue([]);
+    vi.spyOn(api, 'placeEvents').mockResolvedValue([]);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    window.location.hash = '#/places/new';
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Nuovo luogo' });
+    fireEvent.change(screen.getByLabelText(/Nome/), { target: { value: 'Luogo nuovo' } });
+    const address = screen.getByLabelText('Indirizzo');
+    expect(address).toHaveAttribute('maxlength', '500');
+    fireEvent.change(address, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salva' }));
+
+    await waitFor(() => expect(createPlace).toHaveBeenCalledWith({
+      name: 'Luogo nuovo',
+      address: null,
+      description: null,
+      rarity: 1,
+    }));
+  });
+
+  it('shows the address or its empty value on place details', async () => {
+    const place = {
+      id: 51,
+      name: 'Luogo dettagliato',
+      address: null,
+      description: null,
+      rarity: 1,
+      created_at: '2026-07-17T09:00:00Z',
+      updated_at: '2026-07-17T09:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    } as Place;
+    vi.spyOn(api, 'place').mockResolvedValue(place);
+    vi.spyOn(api, 'placePeople').mockResolvedValue([]);
+    vi.spyOn(api, 'placeEvents').mockResolvedValue([]);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    window.location.hash = '#/places/51';
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Luogo dettagliato' });
+    expect(screen.getByText('Indirizzo')).toBeInTheDocument();
+    expect(screen.getByText('Non indicato')).toBeInTheDocument();
+  });
+
+  it('creates a cerchia with the shared entity form behavior', async () => {
+    const savedGroup = {
+      id: 60,
+      name: 'Cerchia nuova',
+      description: null,
+      rarity: 1.5,
+      created_at: '2026-07-31T10:00:00Z',
+      updated_at: '2026-07-31T10:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    } as Group;
+    const createGroup = vi.spyOn(api, 'createGroup').mockResolvedValue(savedGroup);
+    vi.spyOn(api, 'group').mockResolvedValue(savedGroup);
+    vi.spyOn(api, 'groupPeople').mockResolvedValue([]);
+    vi.spyOn(api, 'groupEpochs').mockResolvedValue([]);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    window.location.hash = '#/groups/new';
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Nuova cerchia' });
+    fireEvent.change(screen.getByLabelText(/Nome/), { target: { value: 'Cerchia nuova' } });
+    fireEvent.change(screen.getByLabelText(/Rarità/), { target: { value: '1.5' } });
+    fireEvent.change(screen.getByLabelText('Descrizione'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Salva' }));
+
+    await waitFor(() => expect(createGroup).toHaveBeenCalledWith({
+      name: 'Cerchia nuova',
+      description: null,
+      rarity: 1.5,
+    }));
+  });
+
+  it('edits cerchia people and epochs independently and blocks duplicates', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-31T10:00:00Z',
+      updated_at: '2026-07-31T10:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    const group = {
+      id: 61,
+      name: 'Cerchia collegata',
+      description: 'Descrizione',
+      ...metadata,
+    } as Group;
+    const people = [
+      { id: 1, alias: 'Persona Uno', sex: 'unknown', connotation: 'unknown', ...metadata },
+      { id: 2, alias: 'Persona Due', sex: 'unknown', connotation: 'unknown', ...metadata },
+    ] as Person[];
+    const epochs = [
+      { id: 3, name: 'Epoca Uno', ...metadata },
+      { id: 4, name: 'Epoca Due', ...metadata },
+    ] as Epoch[];
+    vi.spyOn(api, 'group').mockResolvedValue(group);
+    vi.spyOn(api, 'groupPeople').mockResolvedValue([people[0]]);
+    vi.spyOn(api, 'groupEpochs').mockResolvedValue([epochs[0]]);
+    vi.spyOn(api, 'people').mockResolvedValue(people);
+    vi.spyOn(api, 'epochs').mockResolvedValue(epochs);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    const replacePeople = vi.spyOn(api, 'replaceGroupPeople').mockResolvedValue(people);
+    const replaceEpochs = vi.spyOn(api, 'replaceGroupEpochs').mockResolvedValue(epochs);
+    window.location.hash = '#/groups/61';
+
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Cerchia collegata' });
+    const peopleSection = screen.getByRole('heading', { name: 'Persone della cerchia' }).closest('section') as HTMLElement;
+    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Aggiungi' }));
+    const peopleSelects = within(peopleSection).getAllByLabelText('Persona');
+    fireEvent.change(peopleSelects[1], { target: { value: '2' } });
+    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Salva persone' }));
+    await waitFor(() => expect(replacePeople).toHaveBeenCalledWith(61, [1, 2]));
+    expect(within(peopleSection).getByText('Persone della cerchia salvate.')).toBeInTheDocument();
+
+    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Aggiungi' }));
+    const duplicateSelects = within(peopleSection).getAllByLabelText('Persona');
+    fireEvent.change(duplicateSelects[2], { target: { value: '1' } });
+    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Salva persone' }));
+    expect(within(peopleSection).getByRole('alert')).toHaveTextContent('una sola volta');
+    expect(replacePeople).toHaveBeenCalledTimes(1);
+
+    const epochSection = screen.getByRole('heading', { name: 'Epoche della cerchia' }).closest('section') as HTMLElement;
+    fireEvent.click(within(epochSection).getByRole('button', { name: 'Aggiungi' }));
+    const epochSelects = within(epochSection).getAllByLabelText('Epoca');
+    fireEvent.change(epochSelects[1], { target: { value: '4' } });
+    fireEvent.click(within(epochSection).getByRole('button', { name: 'Salva epoche' }));
+    await waitFor(() => expect(replaceEpochs).toHaveBeenCalledWith(61, [3, 4]));
+    expect(within(epochSection).getByText('Epoche della cerchia salvate.')).toBeInTheDocument();
+  });
+
+  it('shows reciprocal cerchia links on person and epoch details', async () => {
+    const metadata = {
+      rarity: 1,
+      created_at: '2026-07-31T10:00:00Z',
+      updated_at: '2026-07-31T10:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    const group = { id: 70, name: 'Cerchia reciproca', description: null, ...metadata } as Group;
+    const person = {
+      id: 71,
+      alias: 'Persona reciproca',
+      sex: 'unknown',
+      connotation: 'unknown',
+      ...metadata,
+    } as Person;
+    const epoch = { id: 72, name: 'Epoca reciproca', ...metadata } as Epoch;
+    vi.spyOn(api, 'person').mockResolvedValue(person);
+    vi.spyOn(api, 'personPlaces').mockResolvedValue([]);
+    vi.spyOn(api, 'personEvents').mockResolvedValue([]);
+    vi.spyOn(api, 'personGroups').mockResolvedValue([group]);
+    vi.spyOn(api, 'media').mockResolvedValue([]);
+    window.location.hash = '#/people/71';
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Persona reciproca' });
+    expect(screen.getByRole('link', { name: 'Cerchia reciproca' })).toHaveAttribute('href', '#/groups/70');
+
+    cleanup();
+    vi.spyOn(api, 'epoch').mockResolvedValue(epoch);
+    vi.spyOn(api, 'epochEvents').mockResolvedValue([]);
+    vi.spyOn(api, 'epochGroups').mockResolvedValue([group]);
+    window.location.hash = '#/epochs/72';
+
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Epoca reciproca' });
+    expect(screen.getByRole('link', { name: 'Cerchia reciproca' })).toHaveAttribute('href', '#/groups/70');
   });
 
   it('uses the requested connotation colors only on person cards', async () => {
