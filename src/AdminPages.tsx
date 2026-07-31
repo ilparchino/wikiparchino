@@ -1,6 +1,7 @@
 import { useEffect, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, formatError } from './api';
+import { LoadingIndicator } from './LoadingIndicator';
 import { PasswordForm } from './PasswordForm';
 import { PasswordInput } from './PasswordInput';
 import { PASSWORD_REQUIREMENTS, passwordPolicyError } from './passwordPolicy';
@@ -73,10 +74,6 @@ function useAdminData<T>(loader: () => Promise<T>, deps: DependencyList) {
   return { data, loading, error, reload: () => setVersion((value) => value + 1) };
 }
 
-function Loading() {
-  return <div className="d-flex align-items-center gap-2 py-5 text-secondary"><span className="spinner-border spinner-border-sm" aria-hidden="true" /><span>Caricamento...</span></div>;
-}
-
 function ErrorAlert({ message }: { message: string }) {
   return <div className="alert alert-danger" role="alert">{message}</div>;
 }
@@ -127,7 +124,7 @@ export function AdminDashboard() {
     () => Promise.all([api.adminSummary(), api.adminUsers(), api.adminActivity({ pageSize: 10 })]),
     [],
   );
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [summary, users, activity] = data;
@@ -289,7 +286,13 @@ export function AdminUserCreatePage() {
           </div>
           <div className="col-12"><div className="form-check form-switch"><input className="form-check-input" id="admin-new-role" type="checkbox" checked={isAdmin} onChange={(event) => setIsAdmin(event.target.checked)} /><label className="form-check-label" htmlFor="admin-new-role">Amministratore</label></div></div>
         </div>
-        <div className="d-flex gap-2 mt-4"><button className="btn btn-primary" type="submit" disabled={submitting}>{submitting ? 'Creazione...' : 'Crea utente'}</button><Link className="btn btn-outline-secondary" to="/admin">Annulla</Link></div>
+        <div className="d-flex gap-2 mt-4">
+          <button className="btn btn-primary" type="submit" disabled={submitting}>
+            {submitting && <span className="me-2"><LoadingIndicator variant="inline" label="Creazione utente" /></span>}
+            {submitting ? 'Creazione...' : 'Crea utente'}
+          </button>
+          <Link className="btn btn-outline-secondary" to="/admin">Annulla</Link>
+        </div>
       </form>
     </section>
   );
@@ -321,7 +324,7 @@ export function AdminUserPage({
   }, [state.data]);
 
   if (!userId) return <ErrorAlert message="Utente non valido." />;
-  if (state.loading && !state.data) return <Loading />;
+  if (state.loading && !state.data) return <LoadingIndicator variant="page" />;
   if (state.error && !state.data) return <ErrorAlert message={state.error} />;
   if (!state.data) return null;
   const target = state.data.user;
@@ -502,7 +505,7 @@ export function AdminActivityPage() {
         <div className="col-md-4"><label className="form-label" htmlFor="activity-source">Origine</label><select className="form-select" id="activity-source" value={source} onChange={(event) => { setSource(event.target.value as AdminActivitySource | ''); setPage(1); }}><option value="">Tutte</option><option value="content">Contenuti</option><option value="account">Account</option><option value="authentication">Accessi</option></select></div>
         <div className="col-md-4"><label className="form-label" htmlFor="activity-action">Azione</label><select className="form-select" id="activity-action" value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}><option value="">Tutte</option>{Object.entries(actionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
       </div></div>
-      {activity.loading && <Loading />}
+      {activity.loading && <LoadingIndicator variant="section" />}
       {activity.error && <ErrorAlert message={activity.error} />}
       {activity.data && (
         <section className="border rounded bg-body p-3 p-md-4">

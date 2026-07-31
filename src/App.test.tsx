@@ -1114,6 +1114,29 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('img', { name: 'Nessuna immagine' })).toBeInTheDocument());
   });
 
+  it('uses the Bootstrap ring while a listed image preview is loading', async () => {
+    const asset = {
+      id: 9,
+      pullable_id: 1,
+      filename: 'foto.png',
+      content_type: 'image/png',
+      created_at: '2026-07-15T10:00:00Z',
+    } as MediaAsset;
+    vi.spyOn(api, 'people').mockResolvedValue([
+      { id: 1, alias: 'Con foto', sex: 'unknown', connotation: 'unknown' } as Person,
+    ]);
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([asset]);
+    vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
+    window.location.hash = '#/people';
+
+    render(<App />);
+
+    const loader = await screen.findByRole('status', { name: 'Caricamento anteprima di Con foto' });
+    expect(loader.closest('.entity-preview')).toBeInTheDocument();
+    expect(loader.querySelector('.spinner-border')).toBeInTheDocument();
+    expect(loader.querySelector('.loading-indicator-logo')).not.toBeInTheDocument();
+  });
+
   it('reloads and revokes authenticated media when a reused ID has a new timestamp', async () => {
     const asset = {
       id: 9,
@@ -1154,6 +1177,43 @@ describe('App', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:replacement-image');
   });
 
+  it('centers the shared media loader while an authenticated image is pending', () => {
+    const asset = {
+      id: 9,
+      pullable_id: 1,
+      filename: 'foto.png',
+      content_type: 'image/png',
+      created_at: '2026-07-15T10:00:00Z',
+    } as MediaAsset;
+    vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
+
+    render(<AuthenticatedMedia asset={asset} position={2} total={3} />);
+
+    const loader = screen.getByRole('status', { name: 'Caricamento immagine 2 di 3' });
+    expect(loader).toHaveClass('loading-indicator-media');
+    expect(loader.closest('.media-carousel-frame')).toBeInTheDocument();
+    expect(loader.querySelector('.spinner-border')).toBeInTheDocument();
+    expect(loader.querySelector('.loading-indicator-logo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Immagine 2 di 3' })).not.toBeInTheDocument();
+  });
+
+  it('uses the Bootstrap ring for image deletion actions', () => {
+    const asset = {
+      id: 9,
+      pullable_id: 1,
+      filename: 'foto.png',
+      content_type: 'image/png',
+      created_at: '2026-07-15T10:00:00Z',
+    } as MediaAsset;
+    vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
+
+    render(<AuthenticatedMedia asset={asset} deleting onDelete={vi.fn()} />);
+
+    const deleteButton = screen.getByRole('button', { name: 'Elimina immagine 1 di 1' });
+    expect(deleteButton.querySelector('.spinner-border')).toBeInTheDocument();
+    expect(deleteButton.querySelector('.loading-indicator-logo')).not.toBeInTheDocument();
+  });
+
   it('uploads immediately from the hidden picker and allows selecting the same file again', async () => {
     let resolveUpload!: (asset: MediaAsset) => void;
     const uploaded = new Promise<MediaAsset>((resolve) => {
@@ -1177,7 +1237,10 @@ describe('App', () => {
 
     fireEvent.change(input, { target: { files: [selectedFile] } });
     expect(uploadMedia).toHaveBeenCalledWith(selectedFile, 1);
-    expect(screen.getByRole('button', { name: 'Caricamento immagine' })).toBeDisabled();
+    const uploadingButton = screen.getByRole('button', { name: 'Caricamento immagine' });
+    expect(uploadingButton).toBeDisabled();
+    expect(uploadingButton.querySelector('.spinner-border')).toBeInTheDocument();
+    expect(uploadingButton.querySelector('.loading-indicator-logo')).not.toBeInTheDocument();
 
     resolveUpload({ id: 11, pullable_id: 1, filename: 'ricordo.png', content_type: 'image/png' } as MediaAsset);
 

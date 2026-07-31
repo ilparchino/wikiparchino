@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ApiError, formatError } from './api';
+import { LoadingIndicator } from './LoadingIndicator';
 import { PasswordInput } from './PasswordInput';
 import { PASSWORD_REQUIREMENTS, passwordPolicyError } from './passwordPolicy';
 
@@ -137,7 +138,7 @@ export function PasswordForm({
         </div>
         <button className="btn btn-primary" type="submit" disabled={submitting}>
           {submitting ? (
-            <span className="spinner-border spinner-border-sm me-2" aria-hidden="true" />
+            <span className="me-2"><LoadingIndicator variant="inline" label="Aggiornamento password" /></span>
           ) : (
             <i className="bi bi-key me-2" aria-hidden="true" />
           )}

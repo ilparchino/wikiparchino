@@ -12,6 +12,7 @@ import {
 import { api, formatError } from './api';
 import { AdminActivityPage, AdminDashboard, AdminUserCreatePage, AdminUserPage } from './AdminPages';
 import { clearAccessToken, getAccessToken, subscribeToSessionLoss } from './auth';
+import { LoadingIndicator } from './LoadingIndicator';
 import { PasswordForm } from './PasswordForm';
 import { PasswordInput } from './PasswordInput';
 import {
@@ -188,15 +189,6 @@ async function loadEntityList<T extends { id: number }>(loader: () => Promise<T[
   };
 }
 
-function Loading() {
-  return (
-    <div className="d-flex align-items-center gap-2 py-5 text-secondary">
-      <div className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
-      <span>Caricamento...</span>
-    </div>
-  );
-}
-
 function ErrorAlert({ message }: { message: string; }) {
   return (
     <div className="alert alert-danger" role="alert">
@@ -297,7 +289,7 @@ function AppRoot({
   )) {
     return (
       <main className="container py-5">
-        <Loading />
+        <LoadingIndicator variant="page" />
       </main>
     );
   }
@@ -441,7 +433,11 @@ function LoginPage({
                       />
                     </div>
                     <button className="btn btn-primary w-100" type="submit" disabled={submitting || loginDisabled}>
-                      <i className="bi bi-box-arrow-in-right me-2" />
+                      {submitting ? (
+                        <span className="me-2"><LoadingIndicator variant="inline" label="Accesso in corso" /></span>
+                      ) : (
+                        <i className="bi bi-box-arrow-in-right me-2" />
+                      )}
                       {submitting ? 'Accesso...' : 'Entra'}
                     </button>
                   </form>
@@ -807,7 +803,7 @@ function Dashboard() {
     [],
   );
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
@@ -874,7 +870,7 @@ function formatActivityDate(value: string): string {
 function ProfilePage() {
   const { data, loading, error } = useAsync(api.profile, []);
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
@@ -966,7 +962,7 @@ function PeopleList() {
 
   return (
     <ListPage title="Persone" createTo="/people/new" filter={filter} onFilter={setFilter}>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna persona trovata.</EmptyState>}
       <EntityList
@@ -1005,7 +1001,7 @@ function PlacesList() {
       filterPlaceholder="Filtra per nome, indirizzo o descrizione"
       onFilter={setFilter}
     >
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
       <EntityList
@@ -1030,7 +1026,7 @@ function EpochsList() {
 
   return (
     <ListPage title="Epoche" createTo="/epochs/new" filter={filter} onFilter={setFilter}>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna epoca trovata.</EmptyState>}
       <EntityList
@@ -1057,7 +1053,7 @@ function EventsList() {
 
   return (
     <ListPage title="Eventi" createTo="/events/new" filter={filter} onFilter={setFilter}>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun evento trovato.</EmptyState>}
       <EntityList
@@ -1092,7 +1088,7 @@ function GroupsList() {
 
   return (
     <ListPage title="Cerchie" createTo="/groups/new" filter={filter} onFilter={setFilter}>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna cerchia trovata.</EmptyState>}
       <EntityList
@@ -1195,7 +1191,7 @@ function EntityList<T extends { id: number; }>({
                   )}
                 </span>
               </span>
-              <span className="entity-card-description small text-secondary d-block">
+              <span className="entity-card-description small text-secondary text-break">
                 {description || 'Nessuna descrizione'}
               </span>
             </Link>
@@ -1260,7 +1256,7 @@ function PersonForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
 
   return (
@@ -1389,7 +1385,7 @@ function EpochForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
 
   const cancelTo = isEdit && epochId ? `/epochs/${epochId}` : '/epochs';
@@ -1497,7 +1493,7 @@ function NamedEntityForm({
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
 
   const title = isEdit ? 'Modifica luogo' : 'Nuovo luogo';
@@ -1580,7 +1576,7 @@ function GroupForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
 
   const cancelTo = isEdit && groupId ? `/groups/${groupId}` : '/groups';
@@ -1762,7 +1758,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
@@ -1901,7 +1897,7 @@ function PersonDetail() {
   }
 
   if (!parsedPersonId) return <ErrorAlert message="Persona non valida." />;
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [person, places, events, groups, media] = data;
@@ -1949,7 +1945,7 @@ function PlaceDetail() {
   }
 
   if (!parsedPlaceId) return <ErrorAlert message="Luogo non valido." />;
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [place, people, events, media] = data;
@@ -1999,7 +1995,7 @@ function EpochDetail() {
   }
 
   if (!parsedEpochId) return <ErrorAlert message="Epoca non valida." />;
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [epoch, events, groups, media] = data;
@@ -2036,7 +2032,7 @@ function EventDetail() {
   }
 
   if (!parsedEventId) return <ErrorAlert message="Evento non valido." />;
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [event, participants, media] = data;
@@ -2097,7 +2093,7 @@ function GroupDetail() {
   }
 
   if (!parsedGroupId) return <ErrorAlert message="Cerchia non valida." />;
-  if (loading) return <Loading />;
+  if (loading) return <LoadingIndicator variant="page" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [group, people, epochs, media] = data;
@@ -2196,7 +2192,7 @@ function Description({ text }: { text?: string | null; }) {
   return (
     <section className="border rounded bg-body p-4">
       <h2 className="h5">Descrizione</h2>
-      <p className="mb-0 text-preline">{text || 'Nessuna descrizione.'}</p>
+      <p className="mb-0 text-preline text-break">{text || 'Nessuna descrizione.'}</p>
     </section>
   );
 }
@@ -2332,7 +2328,7 @@ export function MediaSection({
           aria-label={uploading ? 'Caricamento immagine' : 'Carica immagine'}
           title={uploading ? 'Caricamento immagine' : 'Carica immagine'}
         >
-          {uploading ? <span className="spinner-border spinner-border-sm" aria-hidden="true" /> : <i className="bi bi-upload" aria-hidden="true" />}
+          {uploading ? <LoadingIndicator variant="inline" appearance="bootstrap" label="Caricamento immagine" /> : <i className="bi bi-upload" aria-hidden="true" />}
         </button>
       </div>
       {!onError && error && <div className="mt-2"><ErrorAlert message={error} /></div>}
@@ -2381,6 +2377,8 @@ function EntityPreview({ asset, label }: { asset?: MediaAsset; label: string; })
           <img className="entity-preview-backdrop" src={objectUrl} alt="" aria-hidden="true" />
           <img className="entity-preview-image" src={objectUrl} alt={`Anteprima di ${label}`} />
         </>
+      ) : asset && !error ? (
+        <LoadingIndicator variant="media" appearance="bootstrap" label={`Caricamento anteprima di ${label}`} />
       ) : (
         <span role="img" aria-label="Nessuna immagine">
           <i className="bi bi-image text-secondary" aria-hidden="true" />
@@ -2409,11 +2407,7 @@ export function AuthenticatedMedia({
     <div className="media-slide h-100">
       <div className="media-carousel-frame d-flex align-items-center justify-content-center h-100">
         {error && <span className="text-secondary">Immagine non disponibile</span>}
-        {!error && !objectUrl && (
-          <div className="placeholder-glow" aria-label={`Caricamento immagine ${position} di ${total}`}>
-            <span className="placeholder col-8" />
-          </div>
-        )}
+        {!error && !objectUrl && <LoadingIndicator variant="media" appearance="bootstrap" label={`Caricamento immagine ${position} di ${total}`} />}
         {objectUrl && (
           <>
             <img className="media-carousel-backdrop" src={objectUrl} alt="" aria-hidden="true" />
@@ -2433,7 +2427,7 @@ export function AuthenticatedMedia({
         )}
         {onDelete && (
           <button className="btn btn-light text-danger media-gallery-action" type="button" onClick={onDelete} disabled={deleting} aria-label={`Elimina immagine ${position} di ${total}`} title="Elimina immagine">
-            {deleting ? <span className="spinner-border spinner-border-sm" aria-hidden="true" /> : <i className="bi bi-trash" aria-hidden="true" />}
+            {deleting ? <LoadingIndicator variant="inline" appearance="bootstrap" label={`Eliminazione immagine ${position} di ${total}`} /> : <i className="bi bi-trash" aria-hidden="true" />}
           </button>
         )}
       </div>
@@ -2476,7 +2470,7 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
           Aggiungi
         </button>
       </div>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Collegamenti salvati.</div>}
@@ -2556,7 +2550,7 @@ function GroupPeopleEditor({
           Aggiungi
         </button>
       </div>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Persone della cerchia salvate.</div>}
@@ -2637,7 +2631,7 @@ function GroupEpochsEditor({
           Aggiungi
         </button>
       </div>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Epoche della cerchia salvate.</div>}
@@ -2707,7 +2701,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
           Aggiungi
         </button>
       </div>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Partecipanti salvati.</div>}
@@ -2845,12 +2839,16 @@ function SearchPage() {
       <h1 className="h2 mb-4">Cerca</h1>
       <form className="input-group mb-4" onSubmit={submit}>
         <input className="form-control" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca persone, luoghi, epoche, eventi e cerchie" />
-        <button className="btn btn-primary" type="submit">
-          <i className="bi bi-search me-2" />
-          Cerca
+        <button className="btn btn-primary" type="submit" disabled={loading}>
+          {loading ? (
+            <span className="me-2"><LoadingIndicator variant="inline" label="Ricerca in corso" /></span>
+          ) : (
+            <i className="bi bi-search me-2" />
+          )}
+          {loading ? 'Ricerca...' : 'Cerca'}
         </button>
       </form>
-      {loading && <Loading />}
+      {loading && <LoadingIndicator variant="section" />}
       {error && <ErrorAlert message={error} />}
       {!loading && results.length === 0 && <EmptyState>Nessun risultato da mostrare.</EmptyState>}
       <div className="list-group">
@@ -2870,10 +2868,10 @@ function PullsPage() {
   const [entityType, setEntityType] = useState<EntityType | ''>('');
   const [result, setResult] = useState<PullResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<'random' | 'daily' | null>(null);
 
   async function pull(mode: 'random' | 'daily') {
-    setLoading(true);
+    setLoadingMode(mode);
     setError(null);
     try {
       const selected = entityType || undefined;
@@ -2881,7 +2879,7 @@ function PullsPage() {
     } catch (err) {
       setError(formatError(err, 'Non è stato possibile completare l’estrazione.'));
     } finally {
-      setLoading(false);
+      setLoadingMode(null);
     }
   }
 
@@ -2898,13 +2896,21 @@ function PullsPage() {
             </select>
           </div>
           <div className="col-md-6 d-flex gap-2">
-            <button className="btn btn-primary flex-fill" type="button" disabled={loading} onClick={() => pull('random')}>
-              <i className="bi bi-shuffle me-2" />
-              Estrai
+            <button className="btn btn-primary flex-fill" type="button" disabled={loadingMode !== null} onClick={() => pull('random')}>
+              {loadingMode === 'random' ? (
+                <span className="me-2"><LoadingIndicator variant="inline" label="Estrazione in corso" /></span>
+              ) : (
+                <i className="bi bi-shuffle me-2" />
+              )}
+              {loadingMode === 'random' ? 'Estrazione...' : 'Estrai'}
             </button>
-            <button className="btn btn-outline-primary flex-fill" type="button" disabled={loading} onClick={() => pull('daily')}>
-              <i className="bi bi-sun me-2" />
-              Del giorno
+            <button className="btn btn-outline-primary flex-fill" type="button" disabled={loadingMode !== null} onClick={() => pull('daily')}>
+              {loadingMode === 'daily' ? (
+                <span className="me-2"><LoadingIndicator variant="inline" label="Estrazione del giorno in corso" /></span>
+              ) : (
+                <i className="bi bi-sun me-2" />
+              )}
+              {loadingMode === 'daily' ? 'Estrazione...' : 'Del giorno'}
             </button>
           </div>
         </div>
