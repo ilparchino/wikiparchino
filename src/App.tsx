@@ -912,7 +912,7 @@ function Dashboard() {
       <div className="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-4">
         <div>
           <h1 className="h2 mb-1">Bacheca</h1>
-          <p className="text-secondary mb-0">Panoramica rapida dell'archivio Parchino.</p>
+          <p className="text-secondary mb-0">Panoramica rapida di Wiki Parchino.</p>
         </div>
         <Link className="btn btn-primary" to="/events/new">
           <i className="bi bi-plus-lg me-2" />
