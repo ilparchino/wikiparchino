@@ -131,7 +131,7 @@ describe('App', () => {
     expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('shows a full daily preview and the ten newest created entities', async () => {
+  it('shows a full daily preview and the five newest created entities', async () => {
     const groups: GroupSummary[] = Array.from({ length: 10 }, (_, index) => ({
       id: 100 + index,
       name: `Cerchia recente ${index + 1}`,
@@ -180,12 +180,13 @@ describe('App', () => {
     expect(within(dailySection!).getByRole('img', { name: 'Nessuna immagine' })).toBeInTheDocument();
     expect(within(dailySection!).getByText('Rarità 2')).toBeInTheDocument();
 
-    const recentSection = screen.getByRole('heading', { name: 'Ultimi 10 elementi creati' }).closest('section');
+    const recentSection = screen.getByRole('heading', { name: 'Ultimi 5 elementi creati' }).closest('section');
     expect(recentSection).not.toBeNull();
     const recentLinks = within(recentSection!).getAllByRole('link');
-    expect(recentLinks).toHaveLength(10);
+    expect(recentLinks).toHaveLength(5);
     expect(recentLinks[0]).toHaveTextContent('Luogo più recente');
     expect(within(recentSection!).getByText('Cerchia recente 10')).toBeInTheDocument();
+    expect(within(recentSection!).queryByText('Cerchia recente 6')).not.toBeInTheDocument();
     expect(within(recentSection!).queryByText('Cerchia recente 1')).not.toBeInTheDocument();
   });
 
