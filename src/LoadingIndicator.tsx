@@ -6,7 +6,7 @@ const loadingLogo = `${import.meta.env.BASE_URL}brand/logo-mono.png`;
 export function LoadingIndicator({
   variant = 'section',
   label = 'Caricamento...',
-  appearance = 'logo',
+  appearance = 'bootstrap',
 }: {
   variant?: LoadingIndicatorVariant;
   label?: string;

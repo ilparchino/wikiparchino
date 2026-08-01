@@ -101,6 +101,7 @@ describe('App', () => {
         if (url.endsWith('/api/epochs')) return json([]);
         if (url.endsWith('/api/events')) return json([]);
         if (url.endsWith('/api/groups')) return json([]);
+        if (url.includes('/api/media/previews?')) return json([]);
         if (url.includes('/api/pulls/daily')) {
           return json({ entity_type: 'event', id: 1, title: 'Elemento demo', rarity: 1, mode: 'daily' });
         }
@@ -113,6 +114,10 @@ describe('App', () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText('Wiki Parchino')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('Elemento demo')).toBeInTheDocument());
+    const peopleMetricLink = screen.getAllByRole('link', { name: /Persone/ })
+      .find((link) => link.classList.contains('metric-card'));
+    const peopleMetric = peopleMetricLink?.closest('.dashboard-metric-column');
+    expect(peopleMetric).toHaveClass('col-12', 'col-sm-6', 'col-lg', 'flex-grow-1');
     const accountMenu = screen.getByRole('button', { name: 'Francesco' });
     expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(accountMenu);
@@ -124,6 +129,64 @@ describe('App', () => {
     fireEvent.click(themeToggle);
     expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
     expect(accountMenu).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('shows a full daily preview and the ten newest created entities', async () => {
+    const groups: GroupSummary[] = Array.from({ length: 10 }, (_, index) => ({
+      id: 100 + index,
+      name: `Cerchia recente ${index + 1}`,
+      description: `Descrizione completa ${index + 1}`,
+      rarity: 1,
+      people_count: index + 1,
+      epoch_count: 0,
+      created_at: `2026-07-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
+      updated_at: `2026-07-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
+      created_by: 1,
+      updated_by: 1,
+    }));
+    const newestPlace: Place = {
+      id: 300,
+      name: 'Luogo più recente',
+      address: 'Via Demo 10',
+      description: 'Ultimo elemento creato',
+      rarity: 1,
+      created_at: '2026-07-11T10:00:00Z',
+      updated_at: '2026-07-11T10:00:00Z',
+      created_by: 1,
+      updated_by: 1,
+    };
+    vi.spyOn(api, 'people').mockResolvedValue([]);
+    vi.spyOn(api, 'places').mockResolvedValue([newestPlace]);
+    vi.spyOn(api, 'epochs').mockResolvedValue([]);
+    vi.spyOn(api, 'events').mockResolvedValue([]);
+    vi.spyOn(api, 'groups').mockResolvedValue(groups);
+    vi.spyOn(api, 'dailyPull').mockResolvedValue({
+      entity_type: 'group',
+      id: 109,
+      title: 'Cerchia recente 10',
+      rarity: 2,
+      mode: 'daily',
+    });
+    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+
+    render(<App />);
+
+    const dailySection = (await screen.findByRole('heading', { name: 'Elemento del giorno' })).closest('section');
+    expect(dailySection).not.toBeNull();
+    expect(within(dailySection!).getByRole('link')).toHaveAttribute('href', '#/groups/109');
+    expect(within(dailySection!).getByText('Cerchia recente 10')).toBeInTheDocument();
+    expect(within(dailySection!).getByText('10 persone · 0 epoche')).toBeInTheDocument();
+    expect(within(dailySection!).getByText('Descrizione completa 10')).toBeInTheDocument();
+    expect(within(dailySection!).getByRole('img', { name: 'Nessuna immagine' })).toBeInTheDocument();
+    expect(within(dailySection!).getByText('Rarità 2')).toBeInTheDocument();
+
+    const recentSection = screen.getByRole('heading', { name: 'Ultimi 10 elementi creati' }).closest('section');
+    expect(recentSection).not.toBeNull();
+    const recentLinks = within(recentSection!).getAllByRole('link');
+    expect(recentLinks).toHaveLength(10);
+    expect(recentLinks[0]).toHaveTextContent('Luogo più recente');
+    expect(within(recentSection!).getByText('Cerchia recente 10')).toBeInTheDocument();
+    expect(within(recentSection!).queryByText('Cerchia recente 1')).not.toBeInTheDocument();
   });
 
   it('hides administration and blocks its route for regular users', async () => {
@@ -162,7 +225,7 @@ describe('App', () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it('renders administrator metrics, users, and recent activity', async () => {
+  it('renders administrator metrics, users, and a height-matched recent activity panel', async () => {
     vi.spyOn(api, 'adminSummary').mockResolvedValue({
       total_users: 2, active_users: 1, inactive_users: 1, admin_users: 1,
       active_sessions: 3, people: 3, places: 2, epochs: 1, events: 1, groups: 2, media: 4,
@@ -177,7 +240,19 @@ describe('App', () => {
         source: 'authentication', action: 'login_succeeded', occurred_at: '2026-07-18T10:00:00Z',
         actor: user, target: user, entity_type: null, entity_id: null, title: 'Francesco',
         linkable: false, source_ip: '127.0.0.1',
-      }], total: 1, page: 1, page_size: 10,
+      }], total: 1, page: 1, page_size: 15,
+    });
+    let resizeCallback: ResizeObserverCallback | undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      observe = observe;
+      disconnect = disconnect;
+      unobserve = vi.fn();
     });
     window.location.hash = '#/admin';
 
@@ -188,6 +263,21 @@ describe('App', () => {
     expect(screen.getByText('@francesco')).toBeInTheDocument();
     expect(screen.getByText('Proprietario')).toHaveClass('text-bg-warning');
     expect(screen.getByText(/Accesso riuscito/)).toBeInTheDocument();
+    expect(api.adminActivity).toHaveBeenCalledWith({ pageSize: 15 });
+
+    const metric = screen.getByText('Utenti attivi').closest('.dashboard-metric-column');
+    expect(metric).toHaveClass('col-12', 'col-sm-6', 'col-lg-4', 'col-xxl-3', 'flex-grow-1');
+    const usersPanel = screen.getByRole('heading', { name: 'Utenti' }).closest('section');
+    const activityPanel = screen.getByRole('heading', { name: 'Ultime 15 attività' }).closest('section');
+    expect(usersPanel).not.toBeNull();
+    expect(activityPanel).not.toBeNull();
+    await waitFor(() => expect(observe).toHaveBeenCalledWith(usersPanel));
+    vi.spyOn(usersPanel!, 'getBoundingClientRect').mockReturnValue({ height: 480 } as DOMRect);
+    resizeCallback!([], {} as ResizeObserver);
+    expect(activityPanel?.style.getPropertyValue('--admin-users-panel-height')).toBe('480px');
+    expect(activityPanel?.querySelector('.admin-activity-scroll')).toBeInTheDocument();
+    expect(usersPanel?.parentElement).not.toHaveClass('d-flex');
+    expect(activityPanel?.parentElement).not.toHaveClass('d-flex');
   });
 
   it('renders the Owner as read-only for another administrator', async () => {
@@ -257,16 +347,20 @@ describe('App', () => {
     window.location.hash = '#/admin/users/new';
     render(<App />);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Nuovo utente' })).toBeInTheDocument());
+    expect(screen.getByText('I campi obbligatori sono contrassegnati.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Indietro' })).toHaveClass('btn-outline-secondary');
+    const creationForm = screen.getByRole('button', { name: 'Crea utente' }).closest('form');
+    expect(creationForm?.parentElement).toHaveClass('border', 'rounded', 'bg-body', 'p-4');
     expect(screen.getAllByRole('button', { name: 'Mostra password' })).toHaveLength(2);
-    fireEvent.change(screen.getByLabelText('Username *'), { target: { value: 'nuovo' } });
-    fireEvent.change(screen.getByLabelText('Nome visualizzato *'), { target: { value: 'Nuovo Utente' } });
+    fireEvent.change(screen.getByLabelText(/^Username/), { target: { value: 'nuovo' } });
+    fireEvent.change(screen.getByLabelText(/^Nome visualizzato/), { target: { value: 'Nuovo Utente' } });
     expect(screen.getByText(/Da 12 a 200 caratteri stampabili/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'password nuova café ☕' } });
-    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password-diversa' } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: 'password nuova café ☕' } });
+    fireEvent.change(screen.getByLabelText(/^Conferma password/), { target: { value: 'password-diversa' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('conferma');
     expect(createUser).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Conferma password *'), { target: { value: 'password nuova café ☕' } });
+    fireEvent.change(screen.getByLabelText(/^Conferma password/), { target: { value: 'password nuova café ☕' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crea utente' }));
     await waitFor(() => expect(createUser).toHaveBeenCalledWith({
       username: 'nuovo', display_name: 'Nuovo Utente', password: 'password nuova café ☕', is_admin: false,
@@ -410,6 +504,9 @@ describe('App', () => {
     expect(screen.getByLabelText(/Username/)).toHaveValue('francesco');
     expect(screen.getByLabelText(/Password/)).toHaveValue('password');
     fireEvent.click(screen.getByRole('button', { name: 'Entra' }));
+    const pendingLogin = screen.getByRole('button', { name: 'Accesso in corso' });
+    expect(pendingLogin.querySelector('.spinner-border')).toHaveClass('loading-indicator-bootstrap');
+    expect(screen.queryByText('Accesso...')).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('Elemento demo')).toBeInTheDocument());
     expect(getAccessToken()).toBe('new-session-token');

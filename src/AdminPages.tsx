@@ -1,4 +1,4 @@
-import { useEffect, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, formatError } from './api';
 import { LoadingIndicator } from './LoadingIndicator';
@@ -78,6 +78,10 @@ function ErrorAlert({ message }: { message: string }) {
   return <div className="alert alert-danger" role="alert">{message}</div>;
 }
 
+function RequiredMark() {
+  return <span className="text-danger ms-1">*</span>;
+}
+
 function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat('it-IT', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
@@ -119,12 +123,35 @@ function ActivityList({ items, empty = 'Nessuna attività registrata.' }: { item
   );
 }
 
+async function loadAdminDashboard() {
+  const [summary, users] = await Promise.all([api.adminSummary(), api.adminUsers()]);
+  const activity = await api.adminActivity({ pageSize: 15 });
+  return [summary, users, activity] as const;
+}
+
 export function AdminDashboard() {
-  const { data, loading, error } = useAdminData(
-    () => Promise.all([api.adminSummary(), api.adminUsers(), api.adminActivity({ pageSize: 10 })]),
-    [],
-  );
-  if (loading) return <LoadingIndicator variant="page" />;
+  const { data, loading, error } = useAdminData(loadAdminDashboard, []);
+  const usersPanelRef = useRef<HTMLElement>(null);
+  const activityPanelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const usersPanel = usersPanelRef.current;
+    const activityPanel = activityPanelRef.current;
+    if (!usersPanel || !activityPanel || typeof ResizeObserver === 'undefined') return;
+
+    const synchronizeHeight = () => {
+      activityPanel.style.setProperty(
+        '--admin-users-panel-height',
+        `${usersPanel.getBoundingClientRect().height}px`,
+      );
+    };
+    synchronizeHeight();
+    const observer = new ResizeObserver(synchronizeHeight);
+    observer.observe(usersPanel);
+    return () => observer.disconnect();
+  }, [data, loading]);
+
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [summary, users, activity] = data;
@@ -151,9 +178,9 @@ export function AdminDashboard() {
           <Link className="btn btn-primary" to="/admin/users/new"><i className="bi bi-person-plus me-2" />Nuovo utente</Link>
         </div>
       </div>
-      <div className="row g-3 mb-4">
+      <div className="row g-3 mb-4 justify-content-stretch dashboard-metric-grid">
         {metrics.map(([label, value, icon]) => (
-          <div className="col-6 col-md-4 col-xl" key={label}>
+          <div className="col-12 col-sm-6 col-lg-4 col-xxl-3 flex-grow-1 dashboard-metric-column" key={label}>
             <div className="border rounded bg-body p-3 h-100 admin-metric">
               <div className="d-flex justify-content-between gap-2 text-secondary small"><span>{label}</span><i className={`bi ${icon}`} /></div>
               <strong className="h3 mb-0 d-block mt-1">{value}</strong>
@@ -161,9 +188,9 @@ export function AdminDashboard() {
           </div>
         ))}
       </div>
-      <div className="row g-4">
+      <div className="row g-4 admin-dashboard-panels">
         <div className="col-xl-7">
-          <section className="border rounded bg-body p-3 p-md-4">
+          <section className="border rounded bg-body p-3 p-md-4 w-100" ref={usersPanelRef}>
             <h2 className="h5 mb-3">Utenti</h2>
             <div className="table-responsive">
               <table className="table align-middle mb-0">
@@ -174,9 +201,9 @@ export function AdminDashboard() {
           </section>
         </div>
         <div className="col-xl-5">
-          <section className="border rounded bg-body p-3 p-md-4">
-            <div className="d-flex justify-content-between align-items-center mb-2"><h2 className="h5 mb-0">Attività recente</h2><Link className="small" to="/admin/activity">Vedi tutte</Link></div>
-            <ActivityList items={activity.items} />
+          <section className="border rounded bg-body p-3 p-md-4 w-100 admin-activity-panel" ref={activityPanelRef}>
+            <div className="d-flex justify-content-between align-items-center mb-2"><h2 className="h5 mb-0">Ultime 15 attività</h2><Link className="small" to="/admin/activity">Vedi tutte</Link></div>
+            <div className="admin-activity-scroll"><ActivityList items={activity.items} /></div>
           </section>
         </div>
       </div>
@@ -252,48 +279,70 @@ export function AdminUserCreatePage() {
   }
 
   return (
-    <section className="admin-form-page">
-      <AdminBackLink />
-      <h1 className="h2 mt-2 mb-4">Nuovo utente</h1>
-      <form className={`border rounded bg-body p-4${validated ? ' was-validated' : ''}`} noValidate onSubmit={submit}>
+    <section className="mx-auto form-page">
+      <div className="d-flex justify-content-between align-items-center gap-3 mb-4">
+        <div>
+          <h1 className="h2 mb-1">Nuovo utente</h1>
+          <p className="text-secondary mb-0">I campi obbligatori sono contrassegnati.</p>
+        </div>
+        <Link className="btn btn-outline-secondary" to="/admin">
+          <i className="bi bi-arrow-left me-2" />
+          Indietro
+        </Link>
+      </div>
+      <div className="border rounded bg-body p-4">
         {error && <ErrorAlert message={error} />}
-        <div className="row g-3">
-          <div className="col-md-6"><label className="form-label" htmlFor="admin-new-username">Username *</label><input className="form-control" id="admin-new-username" value={username} onChange={(event) => setUsername(event.target.value)} maxLength={80} required /></div>
-          <div className="col-md-6"><label className="form-label" htmlFor="admin-new-display">Nome visualizzato *</label><input className="form-control" id="admin-new-display" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} required /></div>
-          <div className="col-md-6">
-            <label className="form-label" htmlFor="admin-new-password">Password *</label>
-            <PasswordInput
-              autoComplete="new-password"
-              describedBy="admin-new-password-requirements"
-              error={passwordError}
-              id="admin-new-password"
-              value={password}
-              onChange={setPassword}
-              required
-            />
-            <div className="form-text" id="admin-new-password-requirements">{PASSWORD_REQUIREMENTS}</div>
+        <form className={validated ? 'was-validated' : ''} noValidate onSubmit={submit}>
+          <div className="row g-3">
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="admin-new-username">Username<RequiredMark /></label>
+              <input className="form-control" id="admin-new-username" value={username} onChange={(event) => setUsername(event.target.value)} maxLength={80} required />
+              <div className="invalid-feedback">Inserisci uno username.</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="admin-new-display">Nome visualizzato<RequiredMark /></label>
+              <input className="form-control" id="admin-new-display" value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={160} required />
+              <div className="invalid-feedback">Inserisci un nome visualizzato.</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="admin-new-password">Password<RequiredMark /></label>
+              <PasswordInput
+                autoComplete="new-password"
+                describedBy="admin-new-password-requirements"
+                error={passwordError}
+                id="admin-new-password"
+                value={password}
+                onChange={setPassword}
+                required
+              />
+              <div className="form-text" id="admin-new-password-requirements">{PASSWORD_REQUIREMENTS}</div>
+            </div>
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="admin-new-confirmation">Conferma password<RequiredMark /></label>
+              <PasswordInput
+                autoComplete="new-password"
+                error={confirmationError}
+                id="admin-new-confirmation"
+                value={confirmation}
+                onChange={setConfirmation}
+                required
+              />
+            </div>
+            <div className="col-12"><div className="form-check form-switch"><input className="form-check-input" id="admin-new-role" type="checkbox" checked={isAdmin} onChange={(event) => setIsAdmin(event.target.checked)} /><label className="form-check-label" htmlFor="admin-new-role">Amministratore</label></div></div>
           </div>
-          <div className="col-md-6">
-            <label className="form-label" htmlFor="admin-new-confirmation">Conferma password *</label>
-            <PasswordInput
-              autoComplete="new-password"
-              error={confirmationError}
-              id="admin-new-confirmation"
-              value={confirmation}
-              onChange={setConfirmation}
-              required
-            />
+          <div className="d-flex justify-content-end gap-2 mt-4">
+            <Link className="btn btn-outline-secondary" to="/admin">Annulla</Link>
+            <button className="btn btn-primary" type="submit" disabled={submitting}>
+              {submitting ? (
+                <span className="me-2"><LoadingIndicator variant="inline" label="Creazione utente" /></span>
+              ) : (
+                <i className="bi bi-check-lg me-2" />
+              )}
+              {submitting ? 'Creazione...' : 'Crea utente'}
+            </button>
           </div>
-          <div className="col-12"><div className="form-check form-switch"><input className="form-check-input" id="admin-new-role" type="checkbox" checked={isAdmin} onChange={(event) => setIsAdmin(event.target.checked)} /><label className="form-check-label" htmlFor="admin-new-role">Amministratore</label></div></div>
-        </div>
-        <div className="d-flex gap-2 mt-4">
-          <button className="btn btn-primary" type="submit" disabled={submitting}>
-            {submitting && <span className="me-2"><LoadingIndicator variant="inline" label="Creazione utente" /></span>}
-            {submitting ? 'Creazione...' : 'Crea utente'}
-          </button>
-          <Link className="btn btn-outline-secondary" to="/admin">Annulla</Link>
-        </div>
-      </form>
+        </form>
+      </div>
     </section>
   );
 }
@@ -324,7 +373,7 @@ export function AdminUserPage({
   }, [state.data]);
 
   if (!userId) return <ErrorAlert message="Utente non valido." />;
-  if (state.loading && !state.data) return <LoadingIndicator variant="page" />;
+  if (state.loading && !state.data) return <LoadingIndicator variant="page" appearance="logo" />;
   if (state.error && !state.data) return <ErrorAlert message={state.error} />;
   if (!state.data) return null;
   const target = state.data.user;
@@ -505,7 +554,7 @@ export function AdminActivityPage() {
         <div className="col-md-4"><label className="form-label" htmlFor="activity-source">Origine</label><select className="form-select" id="activity-source" value={source} onChange={(event) => { setSource(event.target.value as AdminActivitySource | ''); setPage(1); }}><option value="">Tutte</option><option value="content">Contenuti</option><option value="account">Account</option><option value="authentication">Accessi</option></select></div>
         <div className="col-md-4"><label className="form-label" htmlFor="activity-action">Azione</label><select className="form-select" id="activity-action" value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}><option value="">Tutte</option>{Object.entries(actionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
       </div></div>
-      {activity.loading && <LoadingIndicator variant="section" />}
+      {activity.loading && <LoadingIndicator variant="section" appearance="logo" />}
       {activity.error && <ErrorAlert message={activity.error} />}
       {activity.data && (
         <section className="border rounded bg-body p-3 p-md-4">

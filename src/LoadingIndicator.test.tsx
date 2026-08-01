@@ -5,8 +5,8 @@ import { LoadingIndicator } from './LoadingIndicator';
 describe('LoadingIndicator', () => {
   afterEach(cleanup);
 
-  it.each(['page', 'section'] as const)('centers the visible %s loading state', (variant) => {
-    const { container } = render(<LoadingIndicator variant={variant} />);
+  it.each(['page', 'section'] as const)('centers the visible pulsing-logo %s loading state', (variant) => {
+    const { container } = render(<LoadingIndicator variant={variant} appearance="logo" />);
 
     const indicator = screen.getByRole('status', { name: 'Caricamento...' });
     expect(indicator).toHaveClass('loading-indicator', `loading-indicator-${variant}`);
@@ -15,11 +15,10 @@ describe('LoadingIndicator', () => {
     expect(container.querySelector('.spinner-border')).not.toBeInTheDocument();
   });
 
-  it('uses a centered Bootstrap media state with an accessible hidden label', () => {
+  it('uses the Bootstrap ring by default for a centered media state', () => {
     const { container } = render(
       <LoadingIndicator
         variant="media"
-        appearance="bootstrap"
         label="Caricamento immagine 1 di 2"
       />,
     );
@@ -37,6 +36,7 @@ describe('LoadingIndicator', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByText('Salvataggio')).toHaveClass('visually-hidden');
     expect(container.querySelector('.loading-indicator-inline')).toBeInTheDocument();
-    expect(container.querySelector('.loading-indicator-logo')).toBeInTheDocument();
+    expect(container.querySelector('.spinner-border')).toBeInTheDocument();
+    expect(container.querySelector('.loading-indicator-logo')).not.toBeInTheDocument();
   });
 });

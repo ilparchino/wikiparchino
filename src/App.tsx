@@ -289,7 +289,7 @@ function AppRoot({
   )) {
     return (
       <main className="container py-5">
-        <LoadingIndicator variant="page" />
+        <LoadingIndicator variant="page" appearance="logo" />
       </main>
     );
   }
@@ -434,11 +434,10 @@ function LoginPage({
                     </div>
                     <button className="btn btn-primary w-100" type="submit" disabled={submitting || loginDisabled}>
                       {submitting ? (
-                        <span className="me-2"><LoadingIndicator variant="inline" label="Accesso in corso" /></span>
+                        <LoadingIndicator variant="inline" appearance="bootstrap" label="Accesso in corso" />
                       ) : (
-                        <i className="bi bi-box-arrow-in-right me-2" />
+                        <><i className="bi bi-box-arrow-in-right me-2" />Entra</>
                       )}
-                      {submitting ? 'Accesso...' : 'Entra'}
                     </button>
                   </form>
                 </div>
@@ -797,17 +796,117 @@ function NavItem({
   );
 }
 
-function Dashboard() {
-  const { data, loading, error } = useAsync(
-    () => Promise.all([api.people(), api.places(), api.epochs(), api.events(), api.groups(), api.dailyPull()]),
-    [],
-  );
+type EntityCardBadge = { label: string; className: string; };
 
-  if (loading) return <LoadingIndicator variant="page" />;
+type DashboardEntity = {
+  entityType: EntityType;
+  id: number;
+  title: string;
+  subtitle?: string | null;
+  description?: string | null;
+  badge?: EntityCardBadge;
+  createdAt: string;
+};
+
+function dashboardEntities(
+  people: Person[],
+  places: Place[],
+  epochs: Epoch[],
+  events: Event[],
+  groups: GroupSummary[],
+): DashboardEntity[] {
+  return [
+    ...people.map((person) => ({
+      entityType: 'person' as const,
+      id: person.id,
+      title: person.alias,
+      subtitle: [person.name, person.surname].filter(Boolean).join(' ') || null,
+      description: person.description,
+      badge: {
+        label: connotationLabels[person.connotation],
+        className: connotationBadgeClasses[person.connotation],
+      },
+      createdAt: person.created_at,
+    })),
+    ...places.map((place) => ({
+      entityType: 'place' as const,
+      id: place.id,
+      title: place.name,
+      subtitle: place.address,
+      description: place.description,
+      createdAt: place.created_at,
+    })),
+    ...epochs.map((epoch) => ({
+      entityType: 'epoch' as const,
+      id: epoch.id,
+      title: epoch.name,
+      subtitle: formatEpochRange(epoch),
+      description: epoch.description,
+      createdAt: epoch.created_at,
+    })),
+    ...events.map((event) => ({
+      entityType: 'event' as const,
+      id: event.id,
+      title: event.title,
+      subtitle: [event.place?.name, event.epoch?.name, formatPartialDate(event)].filter(Boolean).join(' · '),
+      description: event.description,
+      createdAt: event.created_at,
+    })),
+    ...groups.map((group) => ({
+      entityType: 'group' as const,
+      id: group.id,
+      title: group.name,
+      subtitle: groupCountSubtitle(group),
+      description: group.description,
+      createdAt: group.created_at,
+    })),
+  ];
+}
+
+async function loadDashboard() {
+  const [people, places, epochs, events, groups, daily] = await Promise.all([
+    api.people(),
+    api.places(),
+    api.epochs(),
+    api.events(),
+    api.groups(),
+    api.dailyPull(),
+  ]);
+  let dailyPreview: MediaAsset | undefined;
+  try {
+    [dailyPreview] = await api.mediaPreviews([daily.id]);
+  } catch {
+    // The dashboard remains usable when the optional daily preview is unavailable.
+  }
+  return { people, places, epochs, events, groups, daily, dailyPreview };
+}
+
+function Dashboard() {
+  const { data, loading, error } = useAsync(loadDashboard, []);
+
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
-  const [people, places, epochs, events, groups, daily] = data;
+  const { people, places, epochs, events, groups, daily, dailyPreview } = data;
+  const entities = dashboardEntities(people, places, epochs, events, groups);
+  const dailyEntity = entities.find((entity) => (
+    entity.entityType === daily.entity_type && entity.id === daily.id
+  )) ?? {
+    entityType: daily.entity_type,
+    id: daily.id,
+    title: daily.title,
+    description: null,
+    createdAt: '',
+  };
+  const recentEntities = [...entities]
+    .sort((left, right) => (
+      Date.parse(right.createdAt) - Date.parse(left.createdAt)
+      || right.id - left.id
+      || right.entityType.localeCompare(left.entityType)
+    ))
+    .slice(0, 5);
+
   return (
     <section>
       <div className="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-4">
@@ -820,7 +919,7 @@ function Dashboard() {
           Nuovo evento
         </Link>
       </div>
-      <div className="row g-3 mb-4">
+      <div className="row g-3 mb-4 dashboard-metric-grid">
         <MetricCard label="Persone" value={people.length} to="/people" icon="bi-people" />
         <MetricCard label="Luoghi" value={places.length} to="/places" icon="bi-geo-alt" />
         <MetricCard label="Epoche" value={epochs.length} to="/epochs" icon="bi-hourglass-split" />
@@ -829,29 +928,38 @@ function Dashboard() {
       </div>
       <div className="row g-4">
         <div className="col-lg-5">
-          <section className="border rounded bg-body p-4 h-100">
-            <h2 className="h5">Elemento del giorno</h2>
-            <p className="text-secondary mb-3">{entityLabels[daily.entity_type]} con rarità {daily.rarity}</p>
-            <Link className="fs-4 fw-semibold text-decoration-none" to={detailPath(daily.entity_type, daily.id)}>
-              {daily.title}
-            </Link>
+          <section aria-labelledby="daily-entity-heading">
+            <div className="d-flex justify-content-between align-items-center gap-3 mb-3">
+              <h2 className="h5 mb-0" id="daily-entity-heading">Elemento del giorno</h2>
+              <span className="badge text-bg-light">Rarità {daily.rarity}</span>
+            </div>
+            <EntityCard
+              entityType={dailyEntity.entityType}
+              entityId={dailyEntity.id}
+              title={dailyEntity.title}
+              subtitle={dailyEntity.subtitle}
+              description={dailyEntity.description}
+              badge={dailyEntity.badge}
+              preview={dailyPreview}
+            />
           </section>
         </div>
         <div className="col-lg-7">
           <section className="border rounded bg-body p-4">
-            <div className="d-flex justify-content-between align-items-center mb-3">
-              <h2 className="h5 mb-0">Ultimi eventi</h2>
-              <Link className="btn btn-outline-primary btn-sm" to="/events">Vedi tutti</Link>
-            </div>
+            <h2 className="h5 mb-3">Ultimi 5 elementi creati</h2>
             <div className="list-group list-group-flush">
-              {events.slice(0, 5).map((event) => (
-                <Link className="list-group-item list-group-item-action px-0" to={`/events/${event.id}`} key={event.id}>
-                  <div className="d-flex justify-content-between gap-3">
-                    <span className="fw-semibold">{event.title}</span>
-                    <span className="text-secondary small">{formatPartialDate(event)}</span>
-                  </div>
+              {recentEntities.map((entity) => (
+                <Link className="list-group-item list-group-item-action px-0" to={detailPath(entity.entityType, entity.id)} key={`${entity.entityType}:${entity.id}`}>
+                  <span className="d-flex justify-content-between align-items-start gap-3">
+                    <span className="min-w-0">
+                      <span className="fw-semibold d-block text-break">{entity.title}</span>
+                      <span className="text-secondary small">{entityLabels[entity.entityType]}</span>
+                    </span>
+                    <time className="text-secondary small text-nowrap" dateTime={entity.createdAt}>{formatActivityDate(entity.createdAt)}</time>
+                  </span>
                 </Link>
               ))}
+              {recentEntities.length === 0 && <span className="text-secondary py-3">Nessun elemento disponibile.</span>}
             </div>
           </section>
         </div>
@@ -870,7 +978,7 @@ function formatActivityDate(value: string): string {
 function ProfilePage() {
   const { data, loading, error } = useAsync(api.profile, []);
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
@@ -936,8 +1044,8 @@ function ProfilePage() {
 
 function MetricCard({ label, value, to, icon }: { label: string; value: number; to: string; icon: string; }) {
   return (
-    <div className="col-6 col-xl-3">
-      <Link className="metric-card border rounded bg-body p-3 text-decoration-none d-block" to={to}>
+    <div className="col-12 col-sm-6 col-lg flex-grow-1 dashboard-metric-column">
+      <Link className="metric-card border rounded bg-body p-3 text-decoration-none d-block h-100" to={to}>
         <div className="d-flex align-items-center justify-content-between">
           <span className="text-secondary">{label}</span>
           <i className={`bi ${icon} text-primary`} />
@@ -962,7 +1070,7 @@ function PeopleList() {
 
   return (
     <ListPage title="Persone" createTo="/people/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna persona trovata.</EmptyState>}
       <EntityList
@@ -1001,7 +1109,7 @@ function PlacesList() {
       filterPlaceholder="Filtra per nome, indirizzo o descrizione"
       onFilter={setFilter}
     >
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
       <EntityList
@@ -1026,7 +1134,7 @@ function EpochsList() {
 
   return (
     <ListPage title="Epoche" createTo="/epochs/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna epoca trovata.</EmptyState>}
       <EntityList
@@ -1053,7 +1161,7 @@ function EventsList() {
 
   return (
     <ListPage title="Eventi" createTo="/events/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessun evento trovato.</EmptyState>}
       <EntityList
@@ -1088,7 +1196,7 @@ function GroupsList() {
 
   return (
     <ListPage title="Cerchie" createTo="/groups/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && filtered.length === 0 && <EmptyState>Nessuna cerchia trovata.</EmptyState>}
       <EntityList
@@ -1161,7 +1269,7 @@ function EntityList<T extends { id: number; }>({
   titleFor: (item: T) => string;
   subtitleFor?: (item: T) => string | null | undefined;
   descriptionFor: (item: T) => string | null | undefined;
-  badgeFor?: (item: T) => { label: string; className: string; } | undefined;
+  badgeFor?: (item: T) => EntityCardBadge | undefined;
 }) {
   return (
     <div className="row g-3">
@@ -1172,33 +1280,63 @@ function EntityList<T extends { id: number; }>({
         const badge = badgeFor?.(item);
         return (
           <div className="col-12 col-md-6 col-xl-4 d-flex" key={item.id}>
-            <Link className="entity-card border rounded bg-body p-3 text-decoration-none" to={detailPath(entityType, item.id)}>
-              <span className="entity-card-summary d-flex gap-3">
-                <EntityPreview asset={previews?.get(item.id)} label={title} />
-                <span className="entity-card-copy min-w-0 flex-grow-1">
-                  <span className="entity-card-heading d-flex align-items-start gap-2">
-                    <span className="entity-card-title h5 mb-0 text-break flex-grow-1">{title}</span>
-                    {badge && (
-                      <span className={`badge ${badge.className} flex-shrink-0`}>
-                        {badge.label}
-                      </span>
-                    )}
-                  </span>
-                  {subtitle && (
-                    <span className="entity-card-subtitle small text-secondary d-block mt-1">
-                      {subtitle}
-                    </span>
-                  )}
-                </span>
-              </span>
-              <span className="entity-card-description small text-secondary text-break">
-                {description || 'Nessuna descrizione'}
-              </span>
-            </Link>
+            <EntityCard
+              entityType={entityType}
+              entityId={item.id}
+              title={title}
+              subtitle={subtitle}
+              description={description}
+              badge={badge}
+              preview={previews?.get(item.id)}
+            />
           </div>
         );
       })}
     </div>
+  );
+}
+
+function EntityCard({
+  entityType,
+  entityId,
+  title,
+  subtitle,
+  description,
+  badge,
+  preview,
+}: {
+  entityType: EntityType;
+  entityId: number;
+  title: string;
+  subtitle?: string | null;
+  description?: string | null;
+  badge?: EntityCardBadge;
+  preview?: MediaAsset;
+}) {
+  return (
+    <Link className="entity-card border rounded bg-body p-3 text-decoration-none" to={detailPath(entityType, entityId)}>
+      <span className="entity-card-summary d-flex gap-3">
+        <EntityPreview asset={preview} label={title} />
+        <span className="entity-card-copy min-w-0 flex-grow-1">
+          <span className="entity-card-heading d-flex align-items-start gap-2">
+            <span className="entity-card-title h5 mb-0 text-break flex-grow-1">{title}</span>
+            {badge && (
+              <span className={`badge ${badge.className} flex-shrink-0`}>
+                {badge.label}
+              </span>
+            )}
+          </span>
+          {subtitle && (
+            <span className="entity-card-subtitle small text-secondary d-block mt-1">
+              {subtitle}
+            </span>
+          )}
+        </span>
+      </span>
+      <span className="entity-card-description small text-secondary text-break">
+        {description || 'Nessuna descrizione'}
+      </span>
+    </Link>
   );
 }
 
@@ -1256,7 +1394,7 @@ function PersonForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
 
   return (
@@ -1385,7 +1523,7 @@ function EpochForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
 
   const cancelTo = isEdit && epochId ? `/epochs/${epochId}` : '/epochs';
@@ -1493,7 +1631,7 @@ function NamedEntityForm({
     }
   }
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
 
   const title = isEdit ? 'Modifica luogo' : 'Nuovo luogo';
@@ -1576,7 +1714,7 @@ function GroupForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
 
   const cancelTo = isEdit && groupId ? `/groups/${groupId}` : '/groups';
@@ -1758,7 +1896,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     }
   }
 
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
@@ -1897,7 +2035,7 @@ function PersonDetail() {
   }
 
   if (!parsedPersonId) return <ErrorAlert message="Persona non valida." />;
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [person, places, events, groups, media] = data;
@@ -1945,7 +2083,7 @@ function PlaceDetail() {
   }
 
   if (!parsedPlaceId) return <ErrorAlert message="Luogo non valido." />;
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [place, people, events, media] = data;
@@ -1995,7 +2133,7 @@ function EpochDetail() {
   }
 
   if (!parsedEpochId) return <ErrorAlert message="Epoca non valida." />;
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [epoch, events, groups, media] = data;
@@ -2032,7 +2170,7 @@ function EventDetail() {
   }
 
   if (!parsedEventId) return <ErrorAlert message="Evento non valido." />;
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [event, participants, media] = data;
@@ -2093,7 +2231,7 @@ function GroupDetail() {
   }
 
   if (!parsedGroupId) return <ErrorAlert message="Cerchia non valida." />;
-  if (loading) return <LoadingIndicator variant="page" />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
   const [group, people, epochs, media] = data;
@@ -2470,7 +2608,7 @@ function PersonPlacesEditor({ personId, initialLinks }: { personId: number; init
           Aggiungi
         </button>
       </div>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Collegamenti salvati.</div>}
@@ -2550,7 +2688,7 @@ function GroupPeopleEditor({
           Aggiungi
         </button>
       </div>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Persone della cerchia salvate.</div>}
@@ -2631,7 +2769,7 @@ function GroupEpochsEditor({
           Aggiungi
         </button>
       </div>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Epoche della cerchia salvate.</div>}
@@ -2701,7 +2839,7 @@ export function EventParticipantsEditor({ eventId, initialParticipants }: { even
           Aggiungi
         </button>
       </div>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {saveError && <ErrorAlert message={saveError} />}
       {saved && <div className="alert alert-success">Partecipanti salvati.</div>}
@@ -2848,7 +2986,7 @@ function SearchPage() {
           {loading ? 'Ricerca...' : 'Cerca'}
         </button>
       </form>
-      {loading && <LoadingIndicator variant="section" />}
+      {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
       {!loading && results.length === 0 && <EmptyState>Nessun risultato da mostrare.</EmptyState>}
       <div className="list-group">
