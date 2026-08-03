@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      VITE_API_URL: https://francescoborri.ddns.net/wikiparchino
-      VITE_BASE_PATH: /wikiparchino/
+      VITE_API_URL: ${{ vars.VITE_API_URL }}
+      VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
 
     steps:
       - name: Verify repository name
