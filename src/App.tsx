@@ -36,6 +36,7 @@ import {
 import { useMaintenance } from './useMaintenance';
 import type {
   Connotation,
+  EntitySearchResult,
   EntityType,
   Epoch,
   Event,
@@ -173,7 +174,7 @@ function useAsync<T>(loader: () => Promise<T>, deps: DependencyList) {
   return { data, loading, error, reload: () => setVersion((current) => current + 1) };
 }
 
-async function loadEntityList<T extends { id: number }>(loader: () => Promise<T[]>) {
+async function loadEntityList<T extends { id: number; }>(loader: () => Promise<T[]>) {
   const items = await loader();
   let previewAssets: MediaAsset[] = [];
   if (items.length > 0) {
@@ -608,10 +609,12 @@ function AuthenticatedApp({
           <Route path="/people/new" element={<PersonForm mode="create" />} />
           <Route path="/people/:id" element={<PersonDetail />} />
           <Route path="/people/:id/edit" element={<PersonForm mode="edit" />} />
+          <Route path="/people/:id/links" element={<PersonLinksPage />} />
           <Route path="/places" element={<PlacesList />} />
           <Route path="/places/new" element={<PlaceForm mode="create" />} />
           <Route path="/places/:id" element={<PlaceDetail />} />
           <Route path="/places/:id/edit" element={<PlaceForm mode="edit" />} />
+          <Route path="/places/:id/links" element={<PlaceLinksPage />} />
           <Route path="/epochs" element={<EpochsList />} />
           <Route path="/epochs/new" element={<EpochForm mode="create" />} />
           <Route path="/epochs/:id" element={<EpochDetail />} />
@@ -620,10 +623,12 @@ function AuthenticatedApp({
           <Route path="/events/new" element={<EventForm mode="create" />} />
           <Route path="/events/:id" element={<EventDetail />} />
           <Route path="/events/:id/edit" element={<EventForm mode="edit" />} />
+          <Route path="/events/:id/links" element={<EventLinksPage />} />
           <Route path="/groups" element={<GroupsList />} />
           <Route path="/groups/new" element={<GroupForm mode="create" />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/groups/:id/edit" element={<GroupForm mode="edit" />} />
+          <Route path="/groups/:id/links" element={<GroupLinksPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/pulls" element={<PullsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -1974,13 +1979,23 @@ function RarityInput({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
-function EntityFormShell({ title, backTo, children }: { title: string; backTo: string; children: ReactNode; }) {
+function EntityFormShell({
+  title,
+  backTo,
+  children,
+  showRequiredHint = true,
+}: {
+  title: string;
+  backTo: string;
+  children: ReactNode;
+  showRequiredHint?: boolean;
+}) {
   return (
     <section className="mx-auto form-page">
-      <div className="d-flex justify-content-between align-items-center gap-3 mb-4">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
         <div>
-          <h1 className="h2 mb-1">{title}</h1>
-          <p className="text-secondary mb-0">I campi obbligatori sono contrassegnati.</p>
+          <h1 className="h2 mb-1 text-break overflow-hidden">{title}</h1>
+          {showRequiredHint && <p className="text-secondary mb-0">I campi obbligatori sono contrassegnati.</p>}
         </div>
         <Link className="btn btn-outline-secondary" to={backTo}>
           <i className="bi bi-arrow-left me-2" />
@@ -2018,12 +2033,12 @@ function PersonDetail() {
     () =>
       parsedPersonId
         ? Promise.all([
-            api.person(personId),
-            api.personPlaces(personId),
-            api.personEvents(personId),
-            api.personGroups(personId),
-            api.media(personId),
-          ])
+          api.person(personId),
+          api.personPlaces(personId),
+          api.personEvents(personId),
+          api.personGroups(personId),
+          api.media(personId),
+        ])
         : Promise.resolve(null),
     [personId, parsedPersonId],
   );
@@ -2051,7 +2066,7 @@ function PersonDetail() {
         ]}
       />
       <Description text={person.description} />
-      <PersonPlacesEditor personId={person.id} initialLinks={places} />
+      <LinkedPlaces links={places} manageTo={`/people/${person.id}/links`} />
       <LinkedEvents events={events} />
       <LinkedGroups groups={groups} />
     </DetailShell>
@@ -2100,7 +2115,7 @@ function PlaceDetail() {
         ]}
       />
       <Description text={place.description} />
-      <LinkedPeople links={people} />
+      <LinkedPeople links={people} manageTo={`/places/${place.id}/links`} />
       <EventListSection title="Eventi in questo luogo" events={events} />
     </DetailShell>
   );
@@ -2190,7 +2205,7 @@ function EventDetail() {
         {event.epoch && <Link className="btn btn-outline-secondary btn-sm" to={`/epochs/${event.epoch.id}`}>Apri epoca</Link>}
       </div>
       <Description text={event.description} />
-      <EventParticipantsEditor eventId={event.id} initialParticipants={participants} />
+      <LinkedParticipants participants={participants} manageTo={`/events/${event.id}/links`} />
     </DetailShell>
   );
 }
@@ -2199,8 +2214,6 @@ function GroupDetail() {
   const parsedGroupId = parseRouteId(useParams().id);
   const groupId = parsedGroupId ?? 0;
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [peopleCount, setPeopleCount] = useState<number | null>(null);
-  const [epochCount, setEpochCount] = useState<number | null>(null);
   const navigate = useNavigate();
   const { data, loading, error, reload } = useAsync(
     () => (parsedGroupId ? Promise.all([
@@ -2211,13 +2224,6 @@ function GroupDetail() {
     ]) : Promise.resolve(null)),
     [groupId, parsedGroupId],
   );
-
-  useEffect(() => {
-    if (data) {
-      setPeopleCount(data[1].length);
-      setEpochCount(data[2].length);
-    }
-  }, [data]);
 
   async function remove() {
     if (!window.confirm('Eliminare definitivamente questa cerchia?')) return;
@@ -2248,12 +2254,12 @@ function GroupDetail() {
       {deleteError && <ErrorAlert message={deleteError} />}
       <InfoGrid items={[
         ['Rarità', String(group.rarity)],
-        ['Persone collegate', String(peopleCount ?? people.length)],
-        ['Epoche collegate', String(epochCount ?? epochs.length)],
+        ['Persone collegate', String(people.length)],
+        ['Epoche collegate', String(epochs.length)],
       ]} />
       <Description text={group.description} />
-      <GroupPeopleEditor groupId={group.id} initialPeople={people} onSaved={setPeopleCount} />
-      <GroupEpochsEditor groupId={group.id} initialEpochs={epochs} onSaved={setEpochCount} />
+      <LinkedGroupPeople people={people} manageTo={`/groups/${group.id}/links`} />
+      <LinkedEpochs epochs={epochs} manageTo={`/groups/${group.id}/links`} />
     </DetailShell>
   );
 }
@@ -2573,305 +2579,496 @@ export function AuthenticatedMedia({
   );
 }
 
-function PersonPlacesEditor({ personId, initialLinks }: { personId: number; initialLinks: PersonPlace[]; }) {
-  const { data: places, loading, error } = useAsync(api.places, []);
-  const [rows, setRows] = useState(() => initialLinks.map((link) => ({ place_id: String(link.place_id), motivation: link.motivation ?? '' })));
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+type RelationshipDraft = EntitySearchResult & {
+  role: string;
+  motivation: string;
+};
 
-  useEffect(() => {
-    setRows(initialLinks.map((link) => ({ place_id: String(link.place_id), motivation: link.motivation ?? '' })));
-  }, [initialLinks]);
+type RelationshipMetadata = 'none' | 'motivation' | 'participant';
 
-  async function save() {
-    const ids = rows.map((row) => row.place_id).filter(Boolean);
-    if (new Set(ids).size !== ids.length) {
-      setSaveError('Ogni luogo può comparire una sola volta.');
-      return;
-    }
-    setSaveError(null);
-    setSaved(false);
-    try {
-      await api.replacePersonPlaces(personId, rows.filter((row) => row.place_id).map((row) => ({ place_id: Number(row.place_id), motivation: cleanOptional(row.motivation) })));
-      setSaved(true);
-    } catch (err) {
-      setSaveError(formatError(err, 'Non è stato possibile salvare i collegamenti.'));
-    }
-  }
-
-  return (
-    <section className="border rounded bg-body p-4">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="h5 mb-0">Luoghi collegati</h2>
-        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, { place_id: '', motivation: '' }])}>
-          <i className="bi bi-plus-lg me-1" />
-          Aggiungi
-        </button>
-      </div>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {saveError && <ErrorAlert message={saveError} />}
-      {saved && <div className="alert alert-success">Collegamenti salvati.</div>}
-      {places && (
-        <>
-          {rows.length === 0 && <p className="text-secondary">Nessun luogo collegato.</p>}
-          {rows.map((row, index) => (
-            <div className="row g-2 align-items-end mb-2" key={index}>
-              <div className="col-md-5">
-                <label className="form-label">Luogo</label>
-                <select className="form-select" value={row.place_id} onChange={(event) => setRows(rows.map((item, i) => i === index ? { ...item, place_id: event.target.value } : item))}>
-                  <option value="">Scegli luogo</option>
-                  {places.map((place) => <option value={place.id} key={place.id}>{place.name}</option>)}
-                </select>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Motivazione</label>
-                <input className="form-control" value={row.motivation} onChange={(event) => setRows(rows.map((item, i) => i === index ? { ...item, motivation: event.target.value } : item))} />
-              </div>
-              <div className="col-md-1">
-                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, i) => i !== index))} aria-label="Rimuovi luogo">
-                  <i className="bi bi-x-lg" />
-                </button>
-              </div>
-            </div>
-          ))}
-          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva collegamenti</button>
-        </>
-      )}
-    </section>
-  );
+function draftFromResult(result: EntitySearchResult): RelationshipDraft {
+  return { ...result, role: '', motivation: '' };
 }
 
-function GroupPeopleEditor({
-  groupId,
-  initialPeople,
-  onSaved,
+function personResult(person: Person): EntitySearchResult {
+  const fullName = [person.name, person.surname].filter(Boolean).join(' ');
+  return { id: person.id, title: person.alias, subtitle: fullName || person.description };
+}
+
+function placeResult(place: Place): EntitySearchResult {
+  return { id: place.id, title: place.name, subtitle: place.address || place.description };
+}
+
+function epochResult(epoch: Epoch): EntitySearchResult {
+  return { id: epoch.id, title: epoch.name, subtitle: formatEpochRange(epoch) || epoch.description };
+}
+
+export function RelationshipSearchSelector({
+  id,
+  label,
+  search,
+  selectedIds,
+  onSelect,
 }: {
-  groupId: number;
-  initialPeople: Person[];
-  onSaved: (count: number) => void;
+  id: string;
+  label: string;
+  search: (query: string, limit?: number) => Promise<EntitySearchResult[]>;
+  selectedIds: Set<number>;
+  onSelect: (result: EntitySearchResult) => void;
 }) {
-  const { data: people, loading, error } = useAsync(api.people, []);
-  const [rows, setRows] = useState(() => initialPeople.map((person) => String(person.id)));
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<EntitySearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const normalizedQuery = query.trim();
 
   useEffect(() => {
-    setRows(initialPeople.map((person) => String(person.id)));
-  }, [initialPeople]);
-
-  async function save() {
-    const ids = rows.filter(Boolean);
-    if (new Set(ids).size !== ids.length) {
-      setSaveError('Ogni persona può comparire una sola volta.');
-      setSaved(false);
+    if (normalizedQuery.length < 2) {
+      setResults([]);
+      setLoading(false);
+      setError(null);
       return;
     }
-    setSaveError(null);
-    setSaved(false);
-    try {
-      const updated = await api.replaceGroupPeople(groupId, ids.map(Number));
-      setRows(updated.map((person) => String(person.id)));
-      onSaved(updated.length);
-      setSaved(true);
-    } catch (err) {
-      setSaveError(formatError(err, 'Non è stato possibile salvare le persone della cerchia.'));
-    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      search(normalizedQuery, 20)
+        .then((items) => {
+          if (active) setResults(items.filter((item) => !selectedIds.has(item.id)));
+        })
+        .catch((err) => {
+          if (active) setError(formatError(err, 'Non è stato possibile cercare gli elementi.'));
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [normalizedQuery, search, selectedIds]);
+
+  function select(result: EntitySearchResult) {
+    onSelect(result);
+    setQuery('');
+    setResults([]);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   return (
-    <section className="border rounded bg-body p-4">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="h5 mb-0">Persone della cerchia</h2>
-        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, ''])}>
-          <i className="bi bi-plus-lg me-1" />
-          Aggiungi
-        </button>
+    <div className="relationship-search mb-4">
+      <label className="form-label fw-semibold" htmlFor={id}>{label}</label>
+      <div className="input-group">
+        <span className="input-group-text" aria-hidden="true"><i className="bi bi-search" /></span>
+        <input
+          className="form-control"
+          id={id}
+          ref={inputRef}
+          value={query}
+          maxLength={120}
+          onChange={(event) => setQuery(event.target.value)}
+          autoComplete="off"
+        />
+        {loading && (
+          <span className="input-group-text">
+            <LoadingIndicator variant="inline" label="Ricerca in corso" />
+          </span>
+        )}
       </div>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {saveError && <ErrorAlert message={saveError} />}
-      {saved && <div className="alert alert-success">Persone della cerchia salvate.</div>}
-      {people && (
-        <>
-          {rows.length === 0 && <p className="text-secondary">Nessuna persona collegata.</p>}
-          {rows.map((personId, index) => (
-            <div className="row g-2 align-items-end mb-2" key={index}>
-              <div className="col-md-11">
-                <label className="form-label" htmlFor={`group-person-${index}`}>Persona</label>
-                <select
-                  className="form-select"
-                  id={`group-person-${index}`}
-                  value={personId}
-                  onChange={(event) => setRows(rows.map((value, rowIndex) => rowIndex === index ? event.target.value : value))}
-                >
-                  <option value="">Scegli persona</option>
-                  {people.map((person) => <option value={person.id} key={person.id}>{person.alias}</option>)}
-                </select>
-              </div>
-              <div className="col-md-1">
-                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Rimuovi persona dalla cerchia">
-                  <i className="bi bi-x-lg" />
-                </button>
-              </div>
-            </div>
-          ))}
-          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva persone</button>
-        </>
+      {error && <div className="mt-3"><ErrorAlert message={error} /></div>}
+      {!error && normalizedQuery.length >= 2 && !loading && results.length === 0 && (
+        <p className="text-secondary small mb-0 mt-3">Nessun risultato.</p>
       )}
-    </section>
+      {results.length > 0 && (
+        <div className="list-group relationship-search-results mt-2" aria-label="Risultati della ricerca">
+          {results.map((result) => (
+            <button
+              className="list-group-item list-group-item-action d-flex align-items-center justify-content-between gap-3"
+              type="button"
+              onClick={() => select(result)}
+              key={result.id}
+            >
+              <span className="min-w-0 text-start">
+                <span className="fw-semibold d-block text-truncate">{result.title}</span>
+                {result.subtitle && <span className="small text-secondary d-block text-truncate">{result.subtitle}</span>}
+              </span>
+              <i className="bi bi-plus-lg flex-shrink-0" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-function GroupEpochsEditor({
-  groupId,
-  initialEpochs,
-  onSaved,
+export function RelationshipEditor({
+  id,
+  title,
+  searchLabel,
+  emptyText,
+  saveLabel,
+  successMessage,
+  cancelTo,
+  metadata,
+  initialRows,
+  search,
+  onSave,
+  separated = false,
 }: {
-  groupId: number;
-  initialEpochs: Epoch[];
-  onSaved: (count: number) => void;
+  id: string;
+  title: string;
+  searchLabel: string;
+  emptyText: string;
+  saveLabel: string;
+  successMessage: string;
+  cancelTo: string;
+  metadata: RelationshipMetadata;
+  initialRows: RelationshipDraft[];
+  search: (query: string, limit?: number) => Promise<EntitySearchResult[]>;
+  onSave: (rows: RelationshipDraft[]) => Promise<RelationshipDraft[]>;
+  separated?: boolean;
 }) {
-  const { data: epochs, loading, error } = useAsync(api.epochs, []);
-  const [rows, setRows] = useState(() => initialEpochs.map((epoch) => String(epoch.id)));
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [rows, setRows] = useState(initialRows);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const selectedIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
 
-  useEffect(() => {
-    setRows(initialEpochs.map((epoch) => String(epoch.id)));
-  }, [initialEpochs]);
-
-  async function save() {
-    const ids = rows.filter(Boolean);
-    if (new Set(ids).size !== ids.length) {
-      setSaveError('Ogni epoca può comparire una sola volta.');
-      setSaved(false);
-      return;
-    }
-    setSaveError(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
     setSaved(false);
     try {
-      const updated = await api.replaceGroupEpochs(groupId, ids.map(Number));
-      setRows(updated.map((epoch) => String(epoch.id)));
-      onSaved(updated.length);
+      setRows(await onSave(rows));
       setSaved(true);
     } catch (err) {
-      setSaveError(formatError(err, 'Non è stato possibile salvare le epoche della cerchia.'));
+      setError(formatError(err, 'Non è stato possibile salvare i collegamenti.'));
+    } finally {
+      setSaving(false);
     }
   }
 
+  function updateRow(idToUpdate: number, values: Partial<RelationshipDraft>) {
+    setRows((current) => current.map((row) => row.id === idToUpdate ? { ...row, ...values } : row));
+  }
+
   return (
-    <section className="border rounded bg-body p-4">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="h5 mb-0">Epoche della cerchia</h2>
-        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, ''])}>
-          <i className="bi bi-plus-lg me-1" />
-          Aggiungi
-        </button>
-      </div>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
+    <form className={separated ? 'border-top pt-4 mt-4' : ''} onSubmit={submit}>
+      <h2 className="h5 mb-3">{title}</h2>
       {error && <ErrorAlert message={error} />}
-      {saveError && <ErrorAlert message={saveError} />}
-      {saved && <div className="alert alert-success">Epoche della cerchia salvate.</div>}
-      {epochs && (
-        <>
-          {rows.length === 0 && <p className="text-secondary">Nessuna epoca collegata.</p>}
-          {rows.map((epochId, index) => (
-            <div className="row g-2 align-items-end mb-2" key={index}>
-              <div className="col-md-11">
-                <label className="form-label" htmlFor={`group-epoch-${index}`}>Epoca</label>
-                <select
-                  className="form-select"
-                  id={`group-epoch-${index}`}
-                  value={epochId}
-                  onChange={(event) => setRows(rows.map((value, rowIndex) => rowIndex === index ? event.target.value : value))}
+      {saved && <div className="alert alert-success" role="status">{successMessage}</div>}
+      <RelationshipSearchSelector
+        id={`${id}-search`}
+        label={searchLabel}
+        search={search}
+        selectedIds={selectedIds}
+        onSelect={(result) => setRows((current) => [...current, draftFromResult(result)])}
+      />
+      {rows.length === 0 ? (
+        <p className="text-secondary">{emptyText}</p>
+      ) : (
+        <div className="relationship-selected-list border-top" aria-label={title}>
+          {rows.map((row) => (
+            <div className="relationship-selected-item border-bottom py-3" key={row.id}>
+              <div className="d-flex align-items-start justify-content-between gap-3">
+                <div className="min-w-0">
+                  <div className="fw-semibold text-break">{row.title}</div>
+                  {row.subtitle && <div className="small text-secondary text-break">{row.subtitle}</div>}
+                </div>
+                <button
+                  className="btn btn-outline-danger btn-sm relationship-remove"
+                  type="button"
+                  onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}
+                  aria-label={`Rimuovi ${row.title}`}
+                  title="Rimuovi collegamento"
                 >
-                  <option value="">Scegli epoca</option>
-                  {epochs.map((epoch) => <option value={epoch.id} key={epoch.id}>{epoch.name}</option>)}
-                </select>
-              </div>
-              <div className="col-md-1">
-                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Rimuovi epoca dalla cerchia">
-                  <i className="bi bi-x-lg" />
+                  <i className="bi bi-x-lg" aria-hidden="true" />
                 </button>
               </div>
+              {metadata !== 'none' && (
+                <div className="row g-3 mt-1">
+                  {metadata === 'participant' && (
+                    <div className="col-md-5">
+                      <label className="form-label" htmlFor={`${id}-role-${row.id}`}>Ruolo (facoltativo)</label>
+                      <input
+                        className="form-control"
+                        id={`${id}-role-${row.id}`}
+                        value={row.role}
+                        maxLength={255}
+                        placeholder="Es. Guida"
+                        onChange={(event) => updateRow(row.id, { role: event.target.value })}
+                      />
+                    </div>
+                  )}
+                  <div className={metadata === 'participant' ? 'col-md-7' : 'col-12'}>
+                    <label className="form-label" htmlFor={`${id}-motivation-${row.id}`}>Motivazione (facoltativa)</label>
+                    <input
+                      className="form-control"
+                      id={`${id}-motivation-${row.id}`}
+                      value={row.motivation}
+                      onChange={(event) => updateRow(row.id, { motivation: event.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
-          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva epoche</button>
-        </>
+        </div>
+      )}
+      <div className="d-flex justify-content-end gap-2 mt-4">
+        <Link className="btn btn-outline-secondary" to={cancelTo}>Annulla</Link>
+        <button className="btn btn-primary relationship-save" type="submit" disabled={saving}>
+          {saving ? <LoadingIndicator variant="inline" label={saveLabel} /> : <><i className="bi bi-check-lg me-2" />{saveLabel}</>}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function PersonLinksPage() {
+  const parsedId = parseRouteId(useParams().id);
+  const personId = parsedId ?? 0;
+  const { data, loading, error } = useAsync(
+    () => parsedId ? Promise.all([api.person(personId), api.personPlaces(personId)]) : Promise.resolve(null),
+    [parsedId, personId],
+  );
+  if (!parsedId) return <ErrorAlert message="Persona non valida." />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+  const [person, links] = data;
+  const initialRows = links.filter((link) => link.place).map((link) => ({
+    ...draftFromResult(placeResult(link.place!)),
+    motivation: link.motivation ?? '',
+  }));
+  return (
+    <EntityFormShell title={`Luoghi collegati a ${person.alias}`} backTo={`/people/${personId}`} showRequiredHint={false}>
+      <RelationshipEditor
+        id="person-places"
+        title="Luoghi collegati"
+        searchLabel="Cerca un luogo"
+        emptyText="Nessun luogo collegato."
+        saveLabel="Salva collegamenti"
+        successMessage="Collegamenti salvati."
+        cancelTo={`/people/${personId}`}
+        metadata="motivation"
+        initialRows={initialRows}
+        search={api.searchPlaces}
+        onSave={async (rows) => (await api.replacePersonPlaces(personId, rows.map((row) => ({ place_id: row.id, motivation: cleanOptional(row.motivation) }))))
+          .filter((link) => link.place)
+          .map((link) => ({ ...draftFromResult(placeResult(link.place!)), motivation: link.motivation ?? '' }))}
+      />
+    </EntityFormShell>
+  );
+}
+
+function PlaceLinksPage() {
+  const parsedId = parseRouteId(useParams().id);
+  const placeId = parsedId ?? 0;
+  const { data, loading, error } = useAsync(
+    () => parsedId ? Promise.all([api.place(placeId), api.placePeople(placeId)]) : Promise.resolve(null),
+    [parsedId, placeId],
+  );
+  if (!parsedId) return <ErrorAlert message="Luogo non valido." />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+  const [place, links] = data;
+  const initialRows = links.filter((link) => link.person).map((link) => ({
+    ...draftFromResult(personResult(link.person!)),
+    motivation: link.motivation ?? '',
+  }));
+  return (
+    <EntityFormShell title={`Persone collegate a ${place.name}`} backTo={`/places/${placeId}`} showRequiredHint={false}>
+      <RelationshipEditor
+        id="place-people"
+        title="Persone collegate"
+        searchLabel="Cerca una persona"
+        emptyText="Nessuna persona collegata."
+        saveLabel="Salva collegamenti"
+        successMessage="Collegamenti salvati."
+        cancelTo={`/places/${placeId}`}
+        metadata="motivation"
+        initialRows={initialRows}
+        search={api.searchPeople}
+        onSave={async (rows) => (await api.replacePlacePeople(placeId, rows.map((row) => ({ person_id: row.id, motivation: cleanOptional(row.motivation) }))))
+          .filter((link) => link.person)
+          .map((link) => ({ ...draftFromResult(personResult(link.person!)), motivation: link.motivation ?? '' }))}
+      />
+    </EntityFormShell>
+  );
+}
+
+function EventLinksPage() {
+  const parsedId = parseRouteId(useParams().id);
+  const eventId = parsedId ?? 0;
+  const { data, loading, error } = useAsync(
+    () => parsedId ? Promise.all([api.event(eventId), api.eventParticipants(eventId)]) : Promise.resolve(null),
+    [parsedId, eventId],
+  );
+  if (!parsedId) return <ErrorAlert message="Evento non valido." />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+  const [event, links] = data;
+  const initialRows = links.filter((link) => link.person).map((link) => ({
+    ...draftFromResult(personResult(link.person!)),
+    role: link.role ?? '',
+    motivation: link.motivation ?? '',
+  }));
+  return (
+    <EntityFormShell title={`Partecipanti di ${event.title}`} backTo={`/events/${eventId}`} showRequiredHint={false}>
+      <RelationshipEditor
+        id="event-participants"
+        title="Partecipanti"
+        searchLabel="Cerca una persona"
+        emptyText="Nessun partecipante collegato."
+        saveLabel="Salva partecipanti"
+        successMessage="Partecipanti salvati."
+        cancelTo={`/events/${eventId}`}
+        metadata="participant"
+        initialRows={initialRows}
+        search={api.searchPeople}
+        onSave={async (rows) => (await api.replaceEventParticipants(eventId, rows.map((row) => ({ person_id: row.id, role: cleanOptional(row.role), motivation: cleanOptional(row.motivation) }))))
+          .filter((link) => link.person)
+          .map((link) => ({ ...draftFromResult(personResult(link.person!)), role: link.role ?? '', motivation: link.motivation ?? '' }))}
+      />
+    </EntityFormShell>
+  );
+}
+
+function GroupLinksPage() {
+  const parsedId = parseRouteId(useParams().id);
+  const groupId = parsedId ?? 0;
+  const { data, loading, error } = useAsync(
+    () => parsedId ? Promise.all([api.group(groupId), api.groupPeople(groupId), api.groupEpochs(groupId)]) : Promise.resolve(null),
+    [parsedId, groupId],
+  );
+  if (!parsedId) return <ErrorAlert message="Cerchia non valida." />;
+  if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data) return null;
+  const [group, people, epochs] = data;
+  return (
+    <EntityFormShell title={`Collegamenti di ${group.name}`} backTo={`/groups/${groupId}`} showRequiredHint={false}>
+      <RelationshipEditor
+        id="group-people"
+        title="Persone della cerchia"
+        searchLabel="Cerca una persona"
+        emptyText="Nessuna persona collegata."
+        saveLabel="Salva persone"
+        successMessage="Persone della cerchia salvate."
+        cancelTo={`/groups/${groupId}`}
+        metadata="none"
+        initialRows={people.map((person) => draftFromResult(personResult(person)))}
+        search={api.searchPeople}
+        onSave={async (rows) => (await api.replaceGroupPeople(groupId, rows.map((row) => row.id))).map((person) => draftFromResult(personResult(person)))}
+      />
+      <RelationshipEditor
+        id="group-epochs"
+        title="Epoche della cerchia"
+        searchLabel="Cerca un'epoca"
+        emptyText="Nessuna epoca collegata."
+        saveLabel="Salva epoche"
+        successMessage="Epoche della cerchia salvate."
+        cancelTo={`/groups/${groupId}`}
+        metadata="none"
+        initialRows={epochs.map((epoch) => draftFromResult(epochResult(epoch)))}
+        search={api.searchEpochs}
+        onSave={async (rows) => (await api.replaceGroupEpochs(groupId, rows.map((row) => row.id))).map((epoch) => draftFromResult(epochResult(epoch)))}
+        separated
+      />
+    </EntityFormShell>
+  );
+}
+
+function RelationshipSectionHeader({ title, manageTo }: { title: string; manageTo?: string; }) {
+  return (
+    <div className="d-flex align-items-center justify-content-between gap-3 mb-3">
+      <h2 className="h5 mb-0">{title}</h2>
+      {manageTo && (
+        <Link className="btn btn-outline-primary btn-sm" to={manageTo}>
+          <i className="bi bi-link-45deg me-1" aria-hidden="true" />
+          Gestisci
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function LinkedPlaces({ links, manageTo }: { links: PersonPlace[]; manageTo?: string; }) {
+  return (
+    <section className="border rounded bg-body p-4">
+      <RelationshipSectionHeader title="Luoghi collegati" manageTo={manageTo} />
+      {links.length === 0 ? <p className="text-secondary mb-0">Nessun luogo collegato.</p> : (
+        <div className="list-group list-group-flush">
+          {links.map((link) => link.place && (
+            <Link className="list-group-item list-group-item-action px-0" to={`/places/${link.place.id}`} key={link.place_id}>
+              <span className="fw-semibold d-block">{link.place.name}</span>
+              {link.motivation && <span className="small text-secondary d-block mt-1">{link.motivation}</span>}
+            </Link>
+          ))}
+        </div>
       )}
     </section>
   );
 }
 
-export function EventParticipantsEditor({ eventId, initialParticipants }: { eventId: number; initialParticipants: EventParticipant[]; }) {
-  const { data: people, loading, error } = useAsync(api.people, []);
-  const [rows, setRows] = useState(() => initialParticipants.map((link) => ({ person_id: String(link.person_id), role: link.role ?? '', motivation: link.motivation ?? '' })));
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    setRows(initialParticipants.map((link) => ({ person_id: String(link.person_id), role: link.role ?? '', motivation: link.motivation ?? '' })));
-  }, [initialParticipants]);
-
-  async function save() {
-    const ids = rows.map((row) => row.person_id).filter(Boolean);
-    if (new Set(ids).size !== ids.length) {
-      setSaveError('Ogni persona può comparire una sola volta.');
-      return;
-    }
-    setSaveError(null);
-    setSaved(false);
-    try {
-      await api.replaceEventParticipants(eventId, rows.filter((row) => row.person_id).map((row) => ({ person_id: Number(row.person_id), role: cleanOptional(row.role), motivation: cleanOptional(row.motivation) })));
-      setSaved(true);
-    } catch (err) {
-      setSaveError(formatError(err, 'Non è stato possibile salvare i partecipanti.'));
-    }
-  }
-
+function LinkedParticipants({ participants, manageTo }: { participants: EventParticipant[]; manageTo?: string; }) {
   return (
     <section className="border rounded bg-body p-4">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2 className="h5 mb-0">Partecipanti</h2>
-        <button className="btn btn-outline-primary btn-sm" type="button" onClick={() => setRows([...rows, { person_id: '', role: '', motivation: '' }])}>
-          <i className="bi bi-plus-lg me-1" />
-          Aggiungi
-        </button>
-      </div>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {saveError && <ErrorAlert message={saveError} />}
-      {saved && <div className="alert alert-success">Partecipanti salvati.</div>}
-      {people && (
-        <>
-          {rows.length === 0 && <p className="text-secondary">Nessun partecipante collegato.</p>}
-          {rows.map((row, index) => (
-            <div className="row g-2 align-items-end mb-2" key={index}>
-              <div className="col-md-4">
-                <label className="form-label">Persona</label>
-                <select className="form-select" value={row.person_id} onChange={(event) => setRows(rows.map((item, i) => i === index ? { ...item, person_id: event.target.value } : item))}>
-                  <option value="">Scegli persona</option>
-                  {people.map((person) => <option value={person.id} key={person.id}>{person.alias}</option>)}
-                </select>
+      <RelationshipSectionHeader title="Partecipanti" manageTo={manageTo} />
+      {participants.length === 0 ? <p className="text-secondary mb-0">Nessun partecipante collegato.</p> : (
+        <div className="list-group list-group-flush">
+          {participants.map((link) => link.person && (
+            <Link className="list-group-item list-group-item-action px-0" to={`/people/${link.person.id}`} key={link.person_id}>
+              <div className="d-flex justify-content-start align-items-center gap-2">
+                <span className="fw-semibold">{link.person.alias}</span>
+                {link.role && <span className="badge text-bg-light">{link.role}</span>}
               </div>
-              <div className="col-md-3">
-                <label className="form-label" htmlFor={`participant-role-${index}`}>Ruolo</label>
-                <input id={`participant-role-${index}`} className="form-control" value={row.role} maxLength={255} placeholder="Es. Guida" onChange={(event) => setRows(rows.map((item, i) => i === index ? { ...item, role: event.target.value } : item))} />
-              </div>
-              <div className="col-md-4">
-                <label className="form-label">Motivazione</label>
-                <input className="form-control" value={row.motivation} onChange={(event) => setRows(rows.map((item, i) => i === index ? { ...item, motivation: event.target.value } : item))} />
-              </div>
-              <div className="col-md-1">
-                <button className="btn btn-outline-danger w-100" type="button" onClick={() => setRows(rows.filter((_, i) => i !== index))} aria-label="Rimuovi partecipante">
-                  <i className="bi bi-x-lg" />
-                </button>
-              </div>
-            </div>
+              {link.motivation && <span className="small text-secondary d-block mt-1">{link.motivation}</span>}
+            </Link>
           ))}
-          <button className="btn btn-primary mt-2" type="button" onClick={save}>Salva partecipanti</button>
-        </>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LinkedGroupPeople({ people, manageTo }: { people: Person[]; manageTo?: string; }) {
+  return (
+    <section className="border rounded bg-body p-4">
+      <RelationshipSectionHeader title="Persone della cerchia" manageTo={manageTo} />
+      {people.length === 0 ? <p className="text-secondary mb-0">Nessuna persona collegata.</p> : (
+        <div className="list-group list-group-flush">
+          {people.map((person) => (
+            <Link className="list-group-item list-group-item-action px-0 fw-semibold" to={`/people/${person.id}`} key={person.id}>
+              {person.alias}
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LinkedEpochs({ epochs, manageTo }: { epochs: Epoch[]; manageTo?: string; }) {
+  return (
+    <section className="border rounded bg-body p-4">
+      <RelationshipSectionHeader title="Epoche della cerchia" manageTo={manageTo} />
+      {epochs.length === 0 ? <p className="text-secondary mb-0">Nessuna epoca collegata.</p> : (
+        <div className="list-group list-group-flush">
+          {epochs.map((epoch) => (
+            <Link className="list-group-item list-group-item-action px-0" to={`/epochs/${epoch.id}`} key={epoch.id}>
+              <span className="fw-semibold d-block">{epoch.name}</span>
+              {formatEpochRange(epoch) && <span className="small text-secondary">{formatEpochRange(epoch)}</span>}
+            </Link>
+          ))}
+        </div>
       )}
     </section>
   );
@@ -2885,10 +3082,11 @@ export function LinkedEvents({ events }: { events: PersonEvent[]; }) {
         <div className="list-group list-group-flush">
           {events.map((link) => link.event && (
             <Link className="list-group-item list-group-item-action px-0" to={`/events/${link.event.id}`} key={link.event_id}>
-              <div className="d-flex justify-content-between gap-3">
-                <span>{link.event.title}</span>
+              <div className="d-flex justify-content-start align-items-center gap-2">
+                <span className="text-break">{link.event.title}</span>
                 {link.role && <span className="badge text-bg-light">{link.role}</span>}
               </div>
+              {link.motivation && <span className="small text-secondary d-block mt-1">{link.motivation}</span>}
             </Link>
           ))}
         </div>
@@ -2914,16 +3112,16 @@ function LinkedGroups({ groups }: { groups: Group[]; }) {
   );
 }
 
-function LinkedPeople({ links }: { links: PlacePerson[]; }) {
+function LinkedPeople({ links, manageTo }: { links: PlacePerson[]; manageTo?: string; }) {
   return (
     <section className="border rounded bg-body p-4">
-      <h2 className="h5">Persone collegate</h2>
+      <RelationshipSectionHeader title="Persone collegate" manageTo={manageTo} />
       {links.length === 0 ? <p className="text-secondary mb-0">Nessuna persona collegata.</p> : (
         <div className="list-group list-group-flush">
           {links.map((link) => link.person && (
             <Link className="list-group-item list-group-item-action px-0" to={`/people/${link.person.id}`} key={link.person_id}>
-              <span className="fw-semibold">{link.person.alias}</span>
-              {link.motivation && <span className="text-secondary ms-2">{link.motivation}</span>}
+              <span className="fw-semibold d-block">{link.person.alias}</span>
+              {link.motivation && <span className="small text-secondary d-block mt-1">{link.motivation}</span>}
             </Link>
           ))}
         </div>

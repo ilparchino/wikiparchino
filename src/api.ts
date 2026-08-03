@@ -7,6 +7,7 @@ import type {
   AdminUserDetail,
   AdminUserUpdate,
   EntityType,
+  EntitySearchResult,
   Epoch,
   Event,
   Group,
@@ -251,6 +252,16 @@ export const api = {
   deleteGroup: (id: number) => request<void>(`/api/groups/${id}`, { method: 'DELETE' }),
 
   search: (query: string) => request<SearchResult[]>(`/api/search?q=${encodeURIComponent(query)}`),
+  searchPeople: (query: string, limit = 20) =>
+    request<EntitySearchResult[]>(`/api/people/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  searchPlaces: (query: string, limit = 20) =>
+    request<EntitySearchResult[]>(`/api/places/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  searchEpochs: (query: string, limit = 20) =>
+    request<EntitySearchResult[]>(`/api/epochs/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  searchEvents: (query: string, limit = 20) =>
+    request<EntitySearchResult[]>(`/api/events/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  searchGroups: (query: string, limit = 20) =>
+    request<EntitySearchResult[]>(`/api/groups/search?q=${encodeURIComponent(query)}&limit=${limit}`),
   randomPull: (entityType?: EntityType) =>
     request<PullResult>(`/api/pulls/random${entityType ? `?entity_type=${entityType}` : ''}`),
   dailyPull: (entityType?: EntityType) =>
@@ -270,6 +281,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   placePeople: (placeId: number) => request<PlacePerson[]>(`/api/places/${placeId}/people`),
+  replacePlacePeople: (placeId: number, payload: Array<Pick<PlacePerson, 'person_id' | 'motivation'>>) =>
+    request<PlacePerson[]>(`/api/places/${placeId}/people`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   placeEvents: (placeId: number) => request<Event[]>(`/api/places/${placeId}/events`),
   epochEvents: (epochId: number) => request<Event[]>(`/api/epochs/${epochId}/events`),
   groupPeople: (groupId: number) => request<Person[]>(`/api/groups/${groupId}/people`),

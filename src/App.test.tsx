@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import App, { AuthenticatedMedia, DetailShell, EventParticipantsEditor, LinkedEvents, MediaSection } from './App';
+import App, { AuthenticatedMedia, DetailShell, LinkedEvents, MediaSection, RelationshipEditor, RelationshipSearchSelector } from './App';
 import { api } from './api';
 import { clearAccessToken, getAccessToken, setAccessToken } from './auth';
 import { COLOR_MODE_STORAGE_KEY } from './theme';
@@ -9,7 +9,6 @@ import type {
   AdminUserDetail,
   Epoch,
   Event,
-  EventParticipant,
   Group,
   GroupSummary,
   MaintenanceStatus,
@@ -922,7 +921,7 @@ describe('App', () => {
     }));
   });
 
-  it('edits cerchia people and epochs independently and blocks duplicates', async () => {
+  it('edits cerchia people and epochs independently through search', async () => {
     const metadata = {
       rarity: 1,
       created_at: '2026-07-31T10:00:00Z',
@@ -947,38 +946,30 @@ describe('App', () => {
     vi.spyOn(api, 'group').mockResolvedValue(group);
     vi.spyOn(api, 'groupPeople').mockResolvedValue([people[0]]);
     vi.spyOn(api, 'groupEpochs').mockResolvedValue([epochs[0]]);
-    vi.spyOn(api, 'people').mockResolvedValue(people);
-    vi.spyOn(api, 'epochs').mockResolvedValue(epochs);
+    vi.spyOn(api, 'searchPeople').mockResolvedValue([{ id: 2, title: 'Persona Due', subtitle: null }]);
+    vi.spyOn(api, 'searchEpochs').mockResolvedValue([{ id: 4, title: 'Epoca Due', subtitle: null }]);
     vi.spyOn(api, 'media').mockResolvedValue([]);
     const replacePeople = vi.spyOn(api, 'replaceGroupPeople').mockResolvedValue(people);
     const replaceEpochs = vi.spyOn(api, 'replaceGroupEpochs').mockResolvedValue(epochs);
-    window.location.hash = '#/groups/61';
+    window.location.hash = '#/groups/61/links';
 
     render(<App />);
 
-    await screen.findByRole('heading', { name: 'Cerchia collegata' });
-    const peopleSection = screen.getByRole('heading', { name: 'Persone della cerchia' }).closest('section') as HTMLElement;
-    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Aggiungi' }));
-    const peopleSelects = within(peopleSection).getAllByLabelText('Persona');
-    fireEvent.change(peopleSelects[1], { target: { value: '2' } });
-    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Salva persone' }));
+    await screen.findByRole('heading', { name: 'Collegamenti di Cerchia collegata' });
+    const peopleForm = screen.getByRole('heading', { name: 'Persone della cerchia' }).closest('form') as HTMLElement;
+    fireEvent.change(within(peopleForm).getByLabelText('Cerca una persona'), { target: { value: 'Due' } });
+    fireEvent.click(await within(peopleForm).findByRole('button', { name: /Persona Due/ }, { timeout: 1000 }));
+    fireEvent.click(within(peopleForm).getByRole('button', { name: 'Salva persone' }));
     await waitFor(() => expect(replacePeople).toHaveBeenCalledWith(61, [1, 2]));
-    expect(within(peopleSection).getByText('Persone della cerchia salvate.')).toBeInTheDocument();
+    expect(within(peopleForm).getByText('Persone della cerchia salvate.')).toBeInTheDocument();
+    expect(within(peopleForm).queryByRole('combobox')).not.toBeInTheDocument();
 
-    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Aggiungi' }));
-    const duplicateSelects = within(peopleSection).getAllByLabelText('Persona');
-    fireEvent.change(duplicateSelects[2], { target: { value: '1' } });
-    fireEvent.click(within(peopleSection).getByRole('button', { name: 'Salva persone' }));
-    expect(within(peopleSection).getByRole('alert')).toHaveTextContent('una sola volta');
-    expect(replacePeople).toHaveBeenCalledTimes(1);
-
-    const epochSection = screen.getByRole('heading', { name: 'Epoche della cerchia' }).closest('section') as HTMLElement;
-    fireEvent.click(within(epochSection).getByRole('button', { name: 'Aggiungi' }));
-    const epochSelects = within(epochSection).getAllByLabelText('Epoca');
-    fireEvent.change(epochSelects[1], { target: { value: '4' } });
-    fireEvent.click(within(epochSection).getByRole('button', { name: 'Salva epoche' }));
+    const epochForm = screen.getByRole('heading', { name: 'Epoche della cerchia' }).closest('form') as HTMLElement;
+    fireEvent.change(within(epochForm).getByLabelText("Cerca un'epoca"), { target: { value: 'Due' } });
+    fireEvent.click(await within(epochForm).findByRole('button', { name: /Epoca Due/ }, { timeout: 1000 }));
+    fireEvent.click(within(epochForm).getByRole('button', { name: 'Salva epoche' }));
     await waitFor(() => expect(replaceEpochs).toHaveBeenCalledWith(61, [3, 4]));
-    expect(within(epochSection).getByText('Epoche della cerchia salvate.')).toBeInTheDocument();
+    expect(within(epochForm).getByText('Epoche della cerchia salvate.')).toBeInTheDocument();
   });
 
   it('shows reciprocal cerchia links on person and epoch details', async () => {
@@ -1430,44 +1421,75 @@ describe('App', () => {
     expect(screen.getByRole('alert')).not.toHaveTextContent('reset');
   });
 
-  it('edits free-form participant roles and sends blank roles as null', async () => {
-    const people = [
-      { id: 1, alias: 'Dino' },
-      { id: 2, alias: 'Wat' },
-    ] as Person[];
-    const participants = [
-      { person_id: 1, event_id: 10, role: 'Guida', motivation: null, person: people[0] },
-      { person_id: 2, event_id: 10, role: null, motivation: null, person: people[1] },
-    ] as EventParticipant[];
-    vi.spyOn(api, 'people').mockResolvedValue(people);
-    const replace = vi.spyOn(api, 'replaceEventParticipants').mockResolvedValue(participants);
+  it('edits optional relationship metadata without select controls', async () => {
+    const save = vi.fn(async (rows) => rows);
+    render(
+      <MemoryRouter>
+        <RelationshipEditor
+          id="participants"
+          title="Partecipanti"
+          searchLabel="Cerca una persona"
+          emptyText="Nessun partecipante collegato."
+          saveLabel="Salva partecipanti"
+          successMessage="Partecipanti salvati."
+          cancelTo="/events/10"
+          metadata="participant"
+          initialRows={[
+            { id: 1, title: 'Dino', subtitle: null, role: 'Guida', motivation: '' },
+            { id: 2, title: 'Wat', subtitle: null, role: '', motivation: '' },
+          ]}
+          search={vi.fn().mockResolvedValue([])}
+          onSave={save}
+        />
+      </MemoryRouter>,
+    );
 
-    render(<EventParticipantsEditor eventId={10} initialParticipants={participants} />);
-    await waitFor(() => expect(screen.getAllByLabelText('Ruolo')).toHaveLength(2));
-
-    const roleInputs = screen.getAllByLabelText('Ruolo') as HTMLInputElement[];
+    const roleInputs = screen.getAllByLabelText('Ruolo (facoltativo)') as HTMLInputElement[];
     expect(roleInputs[0].tagName).toBe('INPUT');
     expect(roleInputs[0]).toHaveValue('Guida');
     expect(roleInputs[0]).toHaveAttribute('maxlength', '255');
     expect(roleInputs[1]).toHaveValue('');
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
-    fireEvent.change(roleInputs[0], { target: { value: '  Leader  ' } });
+    fireEvent.change(roleInputs[0], { target: { value: 'Leader' } });
     fireEvent.click(screen.getByRole('button', { name: 'Salva partecipanti' }));
 
-    await waitFor(() =>
-      expect(replace).toHaveBeenCalledWith(10, [
-        { person_id: 1, role: 'Leader', motivation: null },
-        { person_id: 2, role: null, motivation: null },
-      ]),
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: 1, role: 'Leader' }),
+      expect.objectContaining({ id: 2, role: '' }),
+    ])));
+    expect(await screen.findByRole('status')).toHaveTextContent('Partecipanti salvati.');
+  });
+
+  it('searches candidates after two characters and omits selected results', async () => {
+    const search = vi.fn().mockResolvedValue([
+      { id: 1, title: 'Dino', subtitle: 'Già collegato' },
+      { id: 2, title: 'Dino Due', subtitle: 'Disponibile' },
+    ]);
+    const select = vi.fn();
+    render(
+      <RelationshipSearchSelector
+        id="people-search"
+        label="Cerca una persona"
+        search={search}
+        selectedIds={new Set([1])}
+        onSelect={select}
+      />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Aggiungi' }));
-    expect((screen.getAllByLabelText('Ruolo') as HTMLInputElement[])[2]).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Cerca una persona'), { target: { value: 'D' } });
+    expect(search).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Cerca una persona'), { target: { value: 'Di' } });
+    await waitFor(() => expect(search).toHaveBeenCalledWith('Di', 20), { timeout: 1000 });
+    expect(await screen.findByText('Dino Due')).toBeInTheDocument();
+    expect(screen.queryByText('Già collegato')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Dino Due/ }));
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
   });
 
   it('displays custom roles and omits badges for missing roles', () => {
     const events = [
-      { person_id: 1, event_id: 10, role: 'Leader', event: { id: 10, title: 'Viaggio' } },
+      { person_id: 1, event_id: 10, role: 'Leader', motivation: 'Ha organizzato il percorso', event: { id: 10, title: 'Viaggio' } },
       { person_id: 1, event_id: 11, role: null, event: { id: 11, title: 'Cena' } },
     ] as PersonEvent[];
 
@@ -1478,6 +1500,7 @@ describe('App', () => {
     );
 
     expect(screen.getByText('Leader')).toBeInTheDocument();
+    expect(screen.getByText('Ha organizzato il percorso')).toBeInTheDocument();
     const badges = container.querySelectorAll('.badge.text-bg-light');
     expect(badges).toHaveLength(1);
     expect(badges[0]).toHaveTextContent('Leader');

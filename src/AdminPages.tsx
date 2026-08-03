@@ -28,6 +28,7 @@ const actionLabels: Record<string, string> = {
   delete: 'Eliminazione contenuto',
   replace_participants: 'Partecipanti aggiornati',
   replace_places: 'Luoghi collegati aggiornati',
+  replace_people: 'Persone collegate aggiornate',
   replace_group_people: 'Persone della cerchia aggiornate',
   replace_group_epochs: 'Epoche della cerchia aggiornate',
   upload_media: 'Immagine caricata',

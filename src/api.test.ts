@@ -185,6 +185,34 @@ describe('api client', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ epoch_ids: [3] });
   });
 
+  it('uses collection search routes and reciprocal place relationship writes', async () => {
+    setAccessToken('relationship-token');
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify([]))),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.searchPeople('di no', 20);
+    await api.searchPlaces('via', 10);
+    await api.searchEpochs('estate');
+    await api.searchEvents('viaggio');
+    await api.searchGroups('amici');
+    await api.replacePlacePeople(7, [{ person_id: 3, motivation: 'Frequentatore' }]);
+
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      expect.stringContaining('/api/people/search?q=di%20no&limit=20'),
+      expect.stringContaining('/api/places/search?q=via&limit=10'),
+      expect.stringContaining('/api/epochs/search?q=estate&limit=20'),
+      expect.stringContaining('/api/events/search?q=viaggio&limit=20'),
+      expect.stringContaining('/api/groups/search?q=amici&limit=20'),
+      expect.stringContaining('/api/places/7/people'),
+    ]);
+    expect(fetchMock.mock.calls[5][1]).toEqual(expect.objectContaining({ method: 'PUT' }));
+    expect(JSON.parse(String(fetchMock.mock.calls[5][1]?.body))).toEqual([
+      { person_id: 3, motivation: 'Frequentatore' },
+    ]);
+  });
+
   it('changes the password without clearing the current token', async () => {
     setAccessToken('current-session');
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>

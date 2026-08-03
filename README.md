@@ -17,6 +17,7 @@ The FastAPI backend is maintained as a separate repository and is required for a
 - Routed list, detail, create, and edit views for every entity type.
 - Content-focused detail headers that keep internal numeric identifiers out of page text.
 - Relationship editing from entity detail pages.
+- Dedicated searchable relationship-management pages, with read-only links on entity details.
 - Independent people and epoch membership management for Cerchie, with reciprocal links on related details.
 - Authenticated image upload, display, deletion, and fixed list previews.
 - Cross-entity search.

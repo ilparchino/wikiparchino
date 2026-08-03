@@ -167,6 +167,12 @@ export interface SearchResult {
   subtitle?: string | null;
 }
 
+export interface EntitySearchResult {
+  id: number;
+  title: string;
+  subtitle?: string | null;
+}
+
 export interface PullResult {
   entity_type: EntityType;
   id: number;
