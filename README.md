@@ -142,7 +142,7 @@ Manual acceptance should cover login, scheduled and active maintenance states, n
 
 - `dist/` is generated and must not be committed on the source branch.
 - Vite uses the `/wikiparchino/` project base and hash routes, so direct URLs have the form `https://ilparchino.github.io/wikiparchino/#/people/1`.
-- The Pages workflow builds with `VITE_API_URL=https://francescoborri.ddns.net/wikiparchino`.
+- The Pages workflow builds with `VITE_API_URL` and `VITE_BASE_PATH` GitHub-configurated environment variables.
 - An HTTPS frontend must use an HTTPS backend to avoid browser mixed-content blocking.
 - The deployed backend CORS origin must exactly match the public frontend origin.
 - Once the remote repository URL exists, expose a visible source-code link in the deployed application to satisfy the AGPLv3 network-source requirement.
