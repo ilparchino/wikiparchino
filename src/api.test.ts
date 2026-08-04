@@ -52,6 +52,8 @@ describe('api client', () => {
 
     const loginHeaders = fetchMock.mock.calls[0][1]?.headers as Headers;
     const meHeaders = fetchMock.mock.calls[1][1]?.headers as Headers;
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/auth/me');
+    expect(String(fetchMock.mock.calls[1][0])).not.toMatch(/\/api\/me(?:\?|$)/);
     expect(loginHeaders.has('Authorization')).toBe(false);
     expect(meHeaders.get('Authorization')).toBe('Bearer opaque-session-token');
     expect(fetchMock.mock.calls[1][1]).not.toHaveProperty('credentials');
@@ -129,19 +131,18 @@ describe('api client', () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it('downloads versioned protected media without browser caching', async () => {
+  it('downloads protected media by ID without browser caching', async () => {
     setAccessToken('media-token');
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
       Promise.resolve(new Response('image', { headers: { 'Content-Type': 'image/png' } })),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const blob = await api.mediaBlob(7, '2026-07-17T10:00:00Z');
+    const blob = await api.mediaBlob(7);
 
     expect(blob.type).toBe('image/png');
-    expect(String(fetchMock.mock.calls[0][0])).toContain(
-      '/api/media/7?version=2026-07-17T10%3A00%3A00Z',
-    );
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/media/7');
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('version=');
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
     expect(headers.get('Authorization')).toBe('Bearer media-token');
@@ -244,6 +245,7 @@ describe('api client', () => {
       actorUserId: 7,
       source: 'authentication',
       action: 'login_failed',
+      order: 'asc',
     })).rejects.toThrow('Non hai i permessi necessari per questa operazione.');
 
     const url = String(fetchMock.mock.calls[0][0]);
@@ -253,6 +255,7 @@ describe('api client', () => {
     expect(url).toContain('actor_user_id=7');
     expect(url).toContain('source=authentication');
     expect(url).toContain('action=login_failed');
+    expect(url).toContain('order=asc');
     expect(getAccessToken()).toBe('admin-token');
   });
 
@@ -307,13 +310,13 @@ describe('api client', () => {
       vi.fn(() => Promise.resolve(new Response(JSON.stringify({ detail: 'Raw backend failure' }), { status }))),
     );
 
-    await expect(api.media(1)).rejects.toThrow(expected);
+    await expect(api.mediaBlob(1)).rejects.toThrow(expected);
   });
 
   it('translates network and unexpected errors safely', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('NetworkError when attempting to fetch resource'))));
 
-    await expect(api.media(1)).rejects.toThrow('Impossibile contattare il server. Controlla la connessione e riprova.');
+    await expect(api.mediaBlob(1)).rejects.toThrow('Impossibile contattare il server. Controlla la connessione e riprova.');
     expect(formatError(new Error('Sensitive JavaScript failure'))).toBe('Si è verificato un errore inatteso. Riprova.');
     expect(formatError(new ApiError(404, 'Raw backend text', true))).toBe('L’elemento richiesto non è disponibile.');
   });

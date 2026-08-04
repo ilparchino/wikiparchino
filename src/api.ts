@@ -17,6 +17,7 @@ import type {
   LoginResponse,
   MaintenanceStatus,
   MediaAsset,
+  Page,
   Person,
   PersonEvent,
   PersonPlace,
@@ -24,6 +25,8 @@ import type {
   PlacePerson,
   Profile,
   PullResult,
+  PullableCounts,
+  RecentPullable,
   SearchResult,
   User,
 } from './types';
@@ -49,8 +52,38 @@ export function resolveApiBase(
 
 export const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL);
 
-type EntityPayload<T> = Omit<T, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>;
+type EntityPayload<T> = Omit<T, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by' | 'media_ids'>;
 type EventPayload = Omit<EntityPayload<Event>, 'place' | 'epoch'>;
+
+export type SortOrder = 'asc' | 'desc';
+
+export interface CollectionParams {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  sort?: string;
+  order?: SortOrder;
+  sex?: Person['sex'];
+  connotation?: Person['connotation'];
+  placeId?: number;
+  epochId?: number;
+  year?: number;
+}
+
+function queryPath(path: string, params: CollectionParams = {}): string {
+  const query = new URLSearchParams();
+  if (params.page) query.set('page', String(params.page));
+  if (params.pageSize) query.set('page_size', String(params.pageSize));
+  if (params.q?.trim()) query.set('q', params.q.trim());
+  if (params.sort) query.set('sort', params.sort);
+  if (params.order) query.set('order', params.order);
+  if (params.sex) query.set('sex', params.sex);
+  if (params.connotation) query.set('connotation', params.connotation);
+  if (params.placeId) query.set('place_id', String(params.placeId));
+  if (params.epochId) query.set('epoch_id', String(params.epochId));
+  if (params.year) query.set('year', String(params.year));
+  return query.size ? `${path}?${query.toString()}` : path;
+}
 
 function httpErrorMessage(status: number, authenticated: boolean): string {
   if (status === 0) return 'Impossibile contattare il server. Controlla la connessione e riprova.';
@@ -169,8 +202,9 @@ export const api = {
       clearAccessToken();
     }
   },
-  me: () => request<User>('/api/me'),
-  profile: () => request<Profile>('/api/profile'),
+  me: () => request<User>('/api/auth/me'),
+  profile: (page = 1, pageSize = 10) =>
+    request<Profile>(`/api/profile?page=${page}&page_size=${pageSize}`),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>('/api/profile/password', {
       method: 'PUT',
@@ -200,6 +234,7 @@ export const api = {
     actorUserId?: number;
     source?: AdminActivitySource;
     action?: string;
+    order?: SortOrder;
   } = {}) => {
     const query = new URLSearchParams();
     if (params.page) query.set('page', String(params.page));
@@ -207,11 +242,19 @@ export const api = {
     if (params.actorUserId) query.set('actor_user_id', String(params.actorUserId));
     if (params.source) query.set('source', params.source);
     if (params.action) query.set('action', params.action);
+    if (params.order) query.set('order', params.order);
     const suffix = query.size > 0 ? `?${query.toString()}` : '';
     return request<AdminActivityPage>(`/api/admin/activity${suffix}`);
   },
 
-  people: () => request<Person[]>('/api/people'),
+  pullableCounts: () => request<PullableCounts>('/api/pullables/counts'),
+  recentPullables: (page = 1, pageSize = 5, entityType?: EntityType) => {
+    const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (entityType) query.set('entity_type', entityType);
+    return request<Page<RecentPullable>>(`/api/pullables/recent?${query.toString()}`);
+  },
+
+  people: (params: CollectionParams = {}) => request<Page<Person>>(queryPath('/api/people', params)),
   person: (id: number) => request<Person>(`/api/people/${id}`),
   createPerson: (payload: EntityPayload<Person>) =>
     request<Person>('/api/people', { method: 'POST', body: JSON.stringify(payload) }),
@@ -219,7 +262,7 @@ export const api = {
     request<Person>(`/api/people/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deletePerson: (id: number) => request<void>(`/api/people/${id}`, { method: 'DELETE' }),
 
-  places: () => request<Place[]>('/api/places'),
+  places: (params: CollectionParams = {}) => request<Page<Place>>(queryPath('/api/places', params)),
   place: (id: number) => request<Place>(`/api/places/${id}`),
   createPlace: (payload: EntityPayload<Place>) =>
     request<Place>('/api/places', { method: 'POST', body: JSON.stringify(payload) }),
@@ -227,7 +270,7 @@ export const api = {
     request<Place>(`/api/places/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deletePlace: (id: number) => request<void>(`/api/places/${id}`, { method: 'DELETE' }),
 
-  epochs: () => request<Epoch[]>('/api/epochs'),
+  epochs: (params: CollectionParams = {}) => request<Page<Epoch>>(queryPath('/api/epochs', params)),
   epoch: (id: number) => request<Epoch>(`/api/epochs/${id}`),
   createEpoch: (payload: EntityPayload<Epoch>) =>
     request<Epoch>('/api/epochs', { method: 'POST', body: JSON.stringify(payload) }),
@@ -235,7 +278,7 @@ export const api = {
     request<Epoch>(`/api/epochs/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteEpoch: (id: number) => request<void>(`/api/epochs/${id}`, { method: 'DELETE' }),
 
-  events: () => request<Event[]>('/api/events'),
+  events: (params: CollectionParams = {}) => request<Page<Event>>(queryPath('/api/events', params)),
   event: (id: number) => request<Event>(`/api/events/${id}`),
   createEvent: (payload: EventPayload) =>
     request<Event>('/api/events', { method: 'POST', body: JSON.stringify(payload) }),
@@ -243,15 +286,19 @@ export const api = {
     request<Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteEvent: (id: number) => request<void>(`/api/events/${id}`, { method: 'DELETE' }),
 
-  groups: () => request<GroupSummary[]>('/api/groups'),
-  group: (id: number) => request<Group>(`/api/groups/${id}`),
+  groups: (params: CollectionParams = {}) => request<Page<GroupSummary>>(queryPath('/api/groups', params)),
+  group: (id: number) => request<GroupSummary>(`/api/groups/${id}`),
   createGroup: (payload: EntityPayload<Group>) =>
     request<Group>('/api/groups', { method: 'POST', body: JSON.stringify(payload) }),
   updateGroup: (id: number, payload: EntityPayload<Group>) =>
     request<Group>(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteGroup: (id: number) => request<void>(`/api/groups/${id}`, { method: 'DELETE' }),
 
-  search: (query: string) => request<SearchResult[]>(`/api/search?q=${encodeURIComponent(query)}`),
+  search: (query: string, page = 1, pageSize = 20, entityType?: EntityType) => {
+    const params = new URLSearchParams({ q: query, page: String(page), page_size: String(pageSize) });
+    if (entityType) params.set('entity_type', entityType);
+    return request<Page<SearchResult>>(`/api/search?${params.toString()}`);
+  },
   searchPeople: (query: string, limit = 20) =>
     request<EntitySearchResult[]>(`/api/people/search?q=${encodeURIComponent(query)}&limit=${limit}`),
   searchPlaces: (query: string, limit = 20) =>
@@ -303,16 +350,13 @@ export const api = {
   personGroups: (personId: number) => request<Group[]>(`/api/people/${personId}/groups`),
   epochGroups: (epochId: number) => request<Group[]>(`/api/epochs/${epochId}/groups`),
 
-  media: (pullableId: number) => request<MediaAsset[]>(`/api/media?pullable_id=${pullableId}`),
   mediaPreviews: (pullableIds: number[]) => {
     const query = new URLSearchParams();
     pullableIds.forEach((id) => query.append('pullable_id', String(id)));
     return request<MediaAsset[]>(`/api/media/previews?${query.toString()}`);
   },
-  mediaBlob: async (id: number, createdAt?: string) => {
-    const version = createdAt ? `?version=${encodeURIComponent(createdAt)}` : '';
-    return (await responseFor(`/api/media/${id}${version}`, { cache: 'no-store' })).blob();
-  },
+  mediaBlob: async (id: number) =>
+    (await responseFor(`/api/media/${id}`, { cache: 'no-store' })).blob(),
   deleteMedia: (id: number) => request<void>(`/api/media/${id}`, { method: 'DELETE' }),
   uploadMedia: (file: File, pullableId: number) => {
     const body = new FormData();

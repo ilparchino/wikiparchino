@@ -8,8 +8,9 @@ import {
   Routes,
   useNavigate,
   useParams,
+  useSearchParams,
 } from 'react-router-dom';
-import { api, formatError } from './api';
+import { api, formatError, type CollectionParams, type SortOrder } from './api';
 import { AdminActivityPage, AdminDashboard, AdminUserCreatePage, AdminUserPage } from './AdminPages';
 import { clearAccessToken, getAccessToken, subscribeToSessionLoss } from './auth';
 import { LoadingIndicator } from './LoadingIndicator';
@@ -43,8 +44,8 @@ import type {
   EventParticipant,
   Group,
   GroupSummary,
-  MediaAsset,
   MaintenanceStatus,
+  Page,
   Person,
   PersonEvent,
   PersonPlace,
@@ -174,19 +175,66 @@ function useAsync<T>(loader: () => Promise<T>, deps: DependencyList) {
   return { data, loading, error, reload: () => setVersion((current) => current + 1) };
 }
 
-async function loadEntityList<T extends { id: number; }>(loader: () => Promise<T[]>) {
-  const items = await loader();
-  let previewAssets: MediaAsset[] = [];
-  if (items.length > 0) {
-    try {
-      previewAssets = await api.mediaPreviews(items.map((item) => item.id));
-    } catch {
-      // List content remains usable when optional previews are unavailable.
-    }
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [value, delay]);
+  return debounced;
+}
+
+function useEntityCollection<T>(
+  loader: (params: CollectionParams) => Promise<Page<T>>,
+  defaultSort: string,
+) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get('q') ?? '';
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const sort = searchParams.get('sort') || defaultSort;
+  const order: SortOrder = searchParams.get('order') === 'desc' ? 'desc' : 'asc';
+  const sex = searchParams.get('sex') as Sex | null;
+  const connotation = searchParams.get('connotation') as Connotation | null;
+
+  function update(values: Record<string, string | null>) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      Object.entries(values).forEach(([key, value]) => {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      });
+      return next;
+    });
   }
+
+  const result = useAsync(
+    () => loader({
+      page,
+      pageSize: 18,
+      q: debouncedQuery || undefined,
+      sort,
+      order,
+      sex: sex || undefined,
+      connotation: connotation || undefined,
+    }),
+    [page, debouncedQuery, sort, order, sex, connotation],
+  );
+
   return {
-    items,
-    previews: new Map(previewAssets.map((asset) => [asset.pullable_id, asset])),
+    ...result,
+    query,
+    page,
+    sort,
+    order,
+    sex,
+    connotation,
+    setQuery: (value: string) => update({ q: value, page: null }),
+    setPage: (value: number) => update({ page: value > 1 ? String(value) : null }),
+    setSort: (value: string) => update({ sort: value === defaultSort ? null : value, page: null }),
+    setOrder: (value: SortOrder) => update({ order: value === 'asc' ? null : value, page: null }),
+    setSex: (value: string) => update({ sex: value || null, page: null }),
+    setConnotation: (value: string) => update({ connotation: value || null, page: null }),
   };
 }
 
@@ -810,18 +858,13 @@ type DashboardEntity = {
   subtitle?: string | null;
   description?: string | null;
   badge?: EntityCardBadge;
-  createdAt: string;
+  mediaId?: number;
 };
 
-function dashboardEntities(
-  people: Person[],
-  places: Place[],
-  epochs: Epoch[],
-  events: Event[],
-  groups: GroupSummary[],
-): DashboardEntity[] {
-  return [
-    ...people.map((person) => ({
+function dashboardEntity(entityType: EntityType, item: Person | Place | Epoch | Event | GroupSummary): DashboardEntity {
+  if (entityType === 'person') {
+    const person = item as Person;
+    return {
       entityType: 'person' as const,
       id: person.id,
       title: person.alias,
@@ -831,59 +874,68 @@ function dashboardEntities(
         label: connotationLabels[person.connotation],
         className: connotationBadgeClasses[person.connotation],
       },
-      createdAt: person.created_at,
-    })),
-    ...places.map((place) => ({
+      mediaId: person.media_ids[0],
+    };
+  }
+  if (entityType === 'place') {
+    const place = item as Place;
+    return {
       entityType: 'place' as const,
       id: place.id,
       title: place.name,
       subtitle: place.address,
       description: place.description,
-      createdAt: place.created_at,
-    })),
-    ...epochs.map((epoch) => ({
+      mediaId: place.media_ids[0],
+    };
+  }
+  if (entityType === 'epoch') {
+    const epoch = item as Epoch;
+    return {
       entityType: 'epoch' as const,
       id: epoch.id,
       title: epoch.name,
       subtitle: formatEpochRange(epoch),
       description: epoch.description,
-      createdAt: epoch.created_at,
-    })),
-    ...events.map((event) => ({
+      mediaId: epoch.media_ids[0],
+    };
+  }
+  if (entityType === 'event') {
+    const event = item as Event;
+    return {
       entityType: 'event' as const,
       id: event.id,
       title: event.title,
       subtitle: [event.place?.name, event.epoch?.name, formatPartialDate(event)].filter(Boolean).join(' · '),
       description: event.description,
-      createdAt: event.created_at,
-    })),
-    ...groups.map((group) => ({
-      entityType: 'group' as const,
-      id: group.id,
-      title: group.name,
-      subtitle: groupCountSubtitle(group),
-      description: group.description,
-      createdAt: group.created_at,
-    })),
-  ];
+      mediaId: event.media_ids[0],
+    };
+  }
+  const group = item as GroupSummary;
+  return {
+    entityType: 'group',
+    id: group.id,
+    title: group.name,
+    subtitle: groupCountSubtitle(group),
+    description: group.description,
+    mediaId: group.media_ids[0],
+  };
 }
 
 async function loadDashboard() {
-  const [people, places, epochs, events, groups, daily] = await Promise.all([
-    api.people(),
-    api.places(),
-    api.epochs(),
-    api.events(),
-    api.groups(),
+  const [counts, recent, daily] = await Promise.all([
+    api.pullableCounts(),
+    api.recentPullables(1, 5),
     api.dailyPull(),
   ]);
-  let dailyPreview: MediaAsset | undefined;
-  try {
-    [dailyPreview] = await api.mediaPreviews([daily.id]);
-  } catch {
-    // The dashboard remains usable when the optional daily preview is unavailable.
-  }
-  return { people, places, epochs, events, groups, daily, dailyPreview };
+  const loaders = {
+    person: api.person,
+    place: api.place,
+    epoch: api.epoch,
+    event: api.event,
+    group: api.group,
+  };
+  const dailyDetail = await loaders[daily.entity_type](daily.id);
+  return { counts, recent, daily, dailyEntity: dashboardEntity(daily.entity_type, dailyDetail) };
 }
 
 function Dashboard() {
@@ -893,24 +945,7 @@ function Dashboard() {
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
 
-  const { people, places, epochs, events, groups, daily, dailyPreview } = data;
-  const entities = dashboardEntities(people, places, epochs, events, groups);
-  const dailyEntity = entities.find((entity) => (
-    entity.entityType === daily.entity_type && entity.id === daily.id
-  )) ?? {
-    entityType: daily.entity_type,
-    id: daily.id,
-    title: daily.title,
-    description: null,
-    createdAt: '',
-  };
-  const recentEntities = [...entities]
-    .sort((left, right) => (
-      Date.parse(right.createdAt) - Date.parse(left.createdAt)
-      || right.id - left.id
-      || right.entityType.localeCompare(left.entityType)
-    ))
-    .slice(0, 5);
+  const { counts, recent, daily, dailyEntity } = data;
 
   return (
     <section>
@@ -925,11 +960,11 @@ function Dashboard() {
         </Link>
       </div>
       <div className="row g-3 mb-4 dashboard-metric-grid">
-        <MetricCard label="Persone" value={people.length} to="/people" icon="bi-people" />
-        <MetricCard label="Luoghi" value={places.length} to="/places" icon="bi-geo-alt" />
-        <MetricCard label="Epoche" value={epochs.length} to="/epochs" icon="bi-hourglass-split" />
-        <MetricCard label="Eventi" value={events.length} to="/events" icon="bi-calendar-event" />
-        <MetricCard label="Cerchie" value={groups.length} to="/groups" icon="bi-diagram-3" />
+        <MetricCard label="Persone" value={counts.people} to="/people" icon="bi-people" />
+        <MetricCard label="Luoghi" value={counts.places} to="/places" icon="bi-geo-alt" />
+        <MetricCard label="Epoche" value={counts.epochs} to="/epochs" icon="bi-hourglass-split" />
+        <MetricCard label="Eventi" value={counts.events} to="/events" icon="bi-calendar-event" />
+        <MetricCard label="Cerchie" value={counts.groups} to="/groups" icon="bi-diagram-3" />
       </div>
       <div className="row g-4">
         <div className="col-lg-5">
@@ -945,7 +980,7 @@ function Dashboard() {
               subtitle={dailyEntity.subtitle}
               description={dailyEntity.description}
               badge={dailyEntity.badge}
-              preview={dailyPreview}
+              previewId={dailyEntity.mediaId}
             />
           </section>
         </div>
@@ -953,18 +988,18 @@ function Dashboard() {
           <section className="border rounded bg-body p-4">
             <h2 className="h5 mb-3">Ultimi 5 elementi creati</h2>
             <div className="list-group list-group-flush">
-              {recentEntities.map((entity) => (
-                <Link className="list-group-item list-group-item-action px-0" to={detailPath(entity.entityType, entity.id)} key={`${entity.entityType}:${entity.id}`}>
+              {recent.items.map((entity) => (
+                <Link className="list-group-item list-group-item-action px-0" to={detailPath(entity.entity_type, entity.id)} key={`${entity.entity_type}:${entity.id}`}>
                   <span className="d-flex justify-content-between align-items-start gap-3">
                     <span className="min-w-0">
                       <span className="fw-semibold d-block text-break">{entity.title}</span>
-                      <span className="text-secondary small">{entityLabels[entity.entityType]}</span>
+                      <span className="text-secondary small">{entityLabels[entity.entity_type]}</span>
                     </span>
-                    <time className="text-secondary small text-nowrap" dateTime={entity.createdAt}>{formatActivityDate(entity.createdAt)}</time>
+                    <time className="text-secondary small text-nowrap" dateTime={entity.created_at}>{formatActivityDate(entity.created_at)}</time>
                   </span>
                 </Link>
               ))}
-              {recentEntities.length === 0 && <span className="text-secondary py-3">Nessun elemento disponibile.</span>}
+              {recent.items.length === 0 && <span className="text-secondary py-3">Nessun elemento disponibile.</span>}
             </div>
           </section>
         </div>
@@ -981,7 +1016,7 @@ function formatActivityDate(value: string): string {
 }
 
 function ProfilePage() {
-  const { data, loading, error } = useAsync(api.profile, []);
+  const { data, loading, error } = useAsync(() => api.profile(1, 10), []);
 
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
@@ -1017,11 +1052,11 @@ function ProfilePage() {
         <div className="col-lg-8">
           <section className="border rounded bg-body p-4" aria-labelledby="activity-heading">
             <h2 className="h5 mb-3" id="activity-heading">Attività recenti</h2>
-            {data.recent_activity.length === 0 ? (
+            {data.activity.items.length === 0 ? (
               <div className="text-secondary py-3">Nessuna attività recente.</div>
             ) : (
               <div className="list-group list-group-flush">
-                {data.recent_activity.map((activity: ProfileActivity, index) => (
+                {data.activity.items.map((activity: ProfileActivity, index) => (
                   <Link
                     className="list-group-item list-group-item-action px-0 d-flex justify-content-between align-items-start gap-3"
                     to={detailPath(activity.entity_type, activity.entity_id)}
@@ -1062,25 +1097,32 @@ function MetricCard({ label, value, to, icon }: { label: string; value: number; 
 }
 
 function PeopleList() {
-  const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(() => loadEntityList(api.people), []);
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((person) =>
-      [person.alias, person.name, person.surname, person.description].some((value) =>
-        (value ?? '').toLowerCase().includes(term),
-      ),
-    );
-  }, [data, filter]);
+  const collection = useEntityCollection(api.people, 'alias');
 
   return (
-    <ListPage title="Persone" createTo="/people/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {!loading && filtered.length === 0 && <EmptyState>Nessuna persona trovata.</EmptyState>}
+    <ListPage
+      title="Persone"
+      createTo="/people/new"
+      collection={collection}
+      sortOptions={[['alias', 'Alias'], ['name', 'Nome'], ['surname', 'Cognome'], ['created_at', 'Creazione'], ['updated_at', 'Ultima modifica'], ['rarity', 'Rarità']]}
+      filters={(
+        <>
+          <select className="form-select" aria-label="Filtra per sesso" value={collection.sex ?? ''} onChange={(event) => collection.setSex(event.target.value)}>
+            <option value="">Tutti i sessi</option>
+            {Object.entries(sexLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+          <select className="form-select" aria-label="Filtra per connotazione" value={collection.connotation ?? ''} onChange={(event) => collection.setConnotation(event.target.value)}>
+            <option value="">Tutte le connotazioni</option>
+            {Object.entries(connotationLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+        </>
+      )}
+    >
+      {collection.loading && <LoadingIndicator variant="section" appearance="logo" />}
+      {collection.error && <ErrorAlert message={collection.error} />}
+      {!collection.loading && collection.data?.items.length === 0 && <EmptyState>Nessuna persona trovata.</EmptyState>}
       <EntityList
-        items={filtered}
-        previews={data?.previews}
+        items={collection.data?.items ?? []}
         entityType="person"
         titleFor={(person) => person.alias}
         subtitleFor={(person) => [person.name, person.surname].filter(Boolean).join(' ') || null}
@@ -1090,93 +1132,73 @@ function PeopleList() {
           className: connotationBadgeClasses[person.connotation],
         })}
       />
+      <Pagination page={collection.page} pageData={collection.data} onPage={collection.setPage} />
     </ListPage>
   );
 }
 
 function PlacesList() {
-  const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(() => loadEntityList(api.places), []);
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((place) =>
-      [place.name, place.address, place.description].some((value) =>
-        (value ?? '').toLowerCase().includes(term),
-      ),
-    );
-  }, [data, filter]);
+  const collection = useEntityCollection(api.places, 'name');
 
   return (
     <ListPage
       title="Luoghi"
       createTo="/places/new"
-      filter={filter}
+      collection={collection}
       filterPlaceholder="Filtra per nome, indirizzo o descrizione"
-      onFilter={setFilter}
+      sortOptions={[['name', 'Nome'], ['address', 'Indirizzo'], ['created_at', 'Creazione'], ['updated_at', 'Ultima modifica'], ['rarity', 'Rarità']]}
     >
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {!loading && filtered.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
+      {collection.loading && <LoadingIndicator variant="section" appearance="logo" />}
+      {collection.error && <ErrorAlert message={collection.error} />}
+      {!collection.loading && collection.data?.items.length === 0 && <EmptyState>Nessun luogo trovato.</EmptyState>}
       <EntityList
-        items={filtered}
-        previews={data?.previews}
+        items={collection.data?.items ?? []}
         entityType="place"
         titleFor={(place) => place.name}
         subtitleFor={(place) => place.address}
         descriptionFor={(place) => place.description}
       />
+      <Pagination page={collection.page} pageData={collection.data} onPage={collection.setPage} />
     </ListPage>
   );
 }
 
 function EpochsList() {
-  const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(() => loadEntityList(api.epochs), []);
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((epoch) => [epoch.name, epoch.description].some((value) => (value ?? '').toLowerCase().includes(term)));
-  }, [data, filter]);
+  const collection = useEntityCollection(api.epochs, 'name');
 
   return (
-    <ListPage title="Epoche" createTo="/epochs/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {!loading && filtered.length === 0 && <EmptyState>Nessuna epoca trovata.</EmptyState>}
+    <ListPage title="Epoche" createTo="/epochs/new" collection={collection} sortOptions={[['name', 'Nome'], ['start_date', 'Data iniziale'], ['end_date', 'Data finale'], ['created_at', 'Creazione'], ['updated_at', 'Ultima modifica'], ['rarity', 'Rarità']]}>
+      {collection.loading && <LoadingIndicator variant="section" appearance="logo" />}
+      {collection.error && <ErrorAlert message={collection.error} />}
+      {!collection.loading && collection.data?.items.length === 0 && <EmptyState>Nessuna epoca trovata.</EmptyState>}
       <EntityList
-        items={filtered}
-        previews={data?.previews}
+        items={collection.data?.items ?? []}
         entityType="epoch"
         titleFor={(epoch) => epoch.name}
         subtitleFor={formatEpochRange}
         descriptionFor={(epoch) => epoch.description}
       />
+      <Pagination page={collection.page} pageData={collection.data} onPage={collection.setPage} />
     </ListPage>
   );
 }
 
 function EventsList() {
-  const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(() => loadEntityList(api.events), []);
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((event) =>
-      [event.title, event.description, event.place?.name, event.epoch?.name].some((value) => (value ?? '').toLowerCase().includes(term)),
-    );
-  }, [data, filter]);
+  const collection = useEntityCollection(api.events, 'date');
 
   return (
-    <ListPage title="Eventi" createTo="/events/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {!loading && filtered.length === 0 && <EmptyState>Nessun evento trovato.</EmptyState>}
+    <ListPage title="Eventi" createTo="/events/new" collection={collection} sortOptions={[['title', 'Titolo'], ['date', 'Data'], ['created_at', 'Creazione'], ['updated_at', 'Ultima modifica'], ['rarity', 'Rarità']]}>
+      {collection.loading && <LoadingIndicator variant="section" appearance="logo" />}
+      {collection.error && <ErrorAlert message={collection.error} />}
+      {!collection.loading && collection.data?.items.length === 0 && <EmptyState>Nessun evento trovato.</EmptyState>}
       <EntityList
-        items={filtered}
-        previews={data?.previews}
+        items={collection.data?.items ?? []}
         entityType="event"
         titleFor={(event) => event.title}
         subtitleFor={(event) => [event.place?.name, event.epoch?.name, formatPartialDate(event)].filter(Boolean).join(' · ')}
         descriptionFor={(event) => event.description}
       />
+      <Pagination page={collection.page} pageData={collection.data} onPage={collection.setPage} />
     </ListPage>
   );
 }
@@ -1188,30 +1210,21 @@ function groupCountSubtitle(group: GroupSummary): string {
 }
 
 function GroupsList() {
-  const [filter, setFilter] = useState('');
-  const { data, loading, error } = useAsync(() => loadEntityList(api.groups), []);
-  const filtered = useMemo(() => {
-    const term = filter.toLowerCase();
-    return (data?.items ?? []).filter((group) =>
-      [group.name, group.description].some((value) =>
-        (value ?? '').toLowerCase().includes(term),
-      ),
-    );
-  }, [data, filter]);
+  const collection = useEntityCollection(api.groups, 'name');
 
   return (
-    <ListPage title="Cerchie" createTo="/groups/new" filter={filter} onFilter={setFilter}>
-      {loading && <LoadingIndicator variant="section" appearance="logo" />}
-      {error && <ErrorAlert message={error} />}
-      {!loading && filtered.length === 0 && <EmptyState>Nessuna cerchia trovata.</EmptyState>}
+    <ListPage title="Cerchie" createTo="/groups/new" collection={collection} sortOptions={[['name', 'Nome'], ['people_count', 'Numero persone'], ['epoch_count', 'Numero epoche'], ['created_at', 'Creazione'], ['updated_at', 'Ultima modifica'], ['rarity', 'Rarità']]}>
+      {collection.loading && <LoadingIndicator variant="section" appearance="logo" />}
+      {collection.error && <ErrorAlert message={collection.error} />}
+      {!collection.loading && collection.data?.items.length === 0 && <EmptyState>Nessuna cerchia trovata.</EmptyState>}
       <EntityList
-        items={filtered}
-        previews={data?.previews}
+        items={collection.data?.items ?? []}
         entityType="group"
         titleFor={(group) => group.name}
         subtitleFor={groupCountSubtitle}
         descriptionFor={(group) => group.description}
       />
+      <Pagination page={collection.page} pageData={collection.data} onPage={collection.setPage} />
     </ListPage>
   );
 }
@@ -1219,16 +1232,25 @@ function GroupsList() {
 function ListPage({
   title,
   createTo,
-  filter,
+  collection,
   filterPlaceholder = 'Filtra per nome o descrizione',
-  onFilter,
+  sortOptions,
+  filters,
   children,
 }: {
   title: string;
   createTo: string;
-  filter: string;
+  collection: {
+    query: string;
+    sort: string;
+    order: SortOrder;
+    setQuery: (value: string) => void;
+    setSort: (value: string) => void;
+    setOrder: (value: SortOrder) => void;
+  };
   filterPlaceholder?: string;
-  onFilter: (value: string) => void;
+  sortOptions: Array<[string, string]>;
+  filters?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -1243,25 +1265,54 @@ function ListPage({
           Crea
         </Link>
       </div>
-      <div className="input-group mb-4">
-        <span className="input-group-text">
-          <i className="bi bi-search" />
-        </span>
-        <input
-          className="form-control"
-          value={filter}
-          onChange={(event) => onFilter(event.target.value)}
-          placeholder={filterPlaceholder}
-        />
+      <div className="row g-2 mb-4 align-items-stretch">
+        <div className="col-12 col-lg">
+          <div className="input-group h-100">
+            <span className="input-group-text"><i className="bi bi-search" /></span>
+            <input className="form-control" value={collection.query} onChange={(event) => collection.setQuery(event.target.value)} placeholder={filterPlaceholder} />
+          </div>
+        </div>
+        {filters && <div className="col-12 col-lg-auto d-flex flex-wrap gap-2">{filters}</div>}
+        <div className="col-8 col-sm-auto">
+          <select className="form-select" aria-label="Ordina per" value={collection.sort} onChange={(event) => collection.setSort(event.target.value)}>
+            {sortOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+        </div>
+        <div className="col-4 col-sm-auto">
+          <button
+            className="btn btn-outline-secondary w-100"
+            type="button"
+            onClick={() => collection.setOrder(collection.order === 'asc' ? 'desc' : 'asc')}
+            aria-label={collection.order === 'asc' ? 'Ordine crescente, passa a decrescente' : 'Ordine decrescente, passa a crescente'}
+            title={collection.order === 'asc' ? 'Ordine crescente' : 'Ordine decrescente'}
+          >
+            <i className={`bi ${collection.order === 'asc' ? 'bi-sort-up' : 'bi-sort-down'}`} aria-hidden="true" />
+          </button>
+        </div>
       </div>
       {children}
     </section>
   );
 }
 
-function EntityList<T extends { id: number; }>({
+function Pagination<T>({ page, pageData, onPage }: { page: number; pageData: Page<T> | null; onPage: (page: number) => void; }) {
+  if (!pageData || pageData.total <= pageData.page_size) return null;
+  const totalPages = Math.ceil(pageData.total / pageData.page_size);
+  return (
+    <nav className="d-flex justify-content-between align-items-center gap-3 mt-4" aria-label="Paginazione">
+      <button className="btn btn-outline-secondary" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        <i className="bi bi-chevron-left me-1" />Precedente
+      </button>
+      <span className="small text-secondary">Pagina {page} di {totalPages}</span>
+      <button className="btn btn-outline-secondary" type="button" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>
+        Successiva<i className="bi bi-chevron-right ms-1" />
+      </button>
+    </nav>
+  );
+}
+
+function EntityList<T extends { id: number; media_ids: number[]; }>({
   items,
-  previews,
   entityType,
   titleFor,
   subtitleFor,
@@ -1269,7 +1320,6 @@ function EntityList<T extends { id: number; }>({
   badgeFor,
 }: {
   items: T[];
-  previews?: Map<number, MediaAsset>;
   entityType: EntityType;
   titleFor: (item: T) => string;
   subtitleFor?: (item: T) => string | null | undefined;
@@ -1292,7 +1342,7 @@ function EntityList<T extends { id: number; }>({
               subtitle={subtitle}
               description={description}
               badge={badge}
-              preview={previews?.get(item.id)}
+              previewId={item.media_ids[0]}
             />
           </div>
         );
@@ -1308,7 +1358,7 @@ function EntityCard({
   subtitle,
   description,
   badge,
-  preview,
+  previewId,
 }: {
   entityType: EntityType;
   entityId: number;
@@ -1316,12 +1366,12 @@ function EntityCard({
   subtitle?: string | null;
   description?: string | null;
   badge?: EntityCardBadge;
-  preview?: MediaAsset;
+  previewId?: number;
 }) {
   return (
     <Link className="entity-card border rounded bg-body p-3 text-decoration-none" to={detailPath(entityType, entityId)}>
       <span className="entity-card-summary d-flex gap-3">
-        <EntityPreview asset={preview} label={title} />
+        <EntityPreview mediaId={previewId} label={title} />
         <span className="entity-card-copy min-w-0 flex-grow-1">
           <span className="entity-card-heading d-flex align-items-start gap-2">
             <span className="entity-card-title h5 mb-0 text-break flex-grow-1">{title}</span>
@@ -1830,9 +1880,11 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
   const navigate = useNavigate();
   const isEdit = mode === 'edit';
   const { data, loading, error } = useAsync(
-    () => Promise.all([api.places(), api.epochs(), isEdit && eventId ? api.event(eventId) : Promise.resolve(null)]),
+    () => (isEdit && eventId ? api.event(eventId) : Promise.resolve(null)),
     [mode, eventId],
   );
+  const [selectedPlace, setSelectedPlace] = useState<EntitySearchResult | null>(null);
+  const [selectedEpoch, setSelectedEpoch] = useState<Epoch | null>(null);
   const [draft, setDraft] = useState({
     title: '',
     description: '',
@@ -1847,7 +1899,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    const event = data?.[2];
+    const event = data;
     if (event) {
       setDraft({
         title: event.title,
@@ -1859,6 +1911,8 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
         day: event.day ? String(event.day) : '',
         rarity: String(event.rarity),
       });
+      if (event.place) setSelectedPlace(placeResult(event.place));
+      if (event.epoch) setSelectedEpoch(event.epoch);
     }
   }, [data]);
 
@@ -1868,9 +1922,6 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
     day: nullableNumber(draft.day),
   };
   const dateError = partialDateError(proposedDate, 'La data dell’evento');
-  const selectedEpoch = data?.[1].find(
-    (epoch) => epoch.id === Number(draft.epoch_id),
-  );
   const dateConflict = selectedEpoch
     ? eventEpochConflict(proposedDate, selectedEpoch)
     : null;
@@ -1883,7 +1934,7 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setValidated(true);
-    if (!event.currentTarget.checkValidity() || dateError || dateConflict) return;
+    if (!event.currentTarget.checkValidity() || !draft.place_id || !draft.epoch_id || dateError || dateConflict) return;
     setSubmitError(null);
     try {
       const payload = {
@@ -1903,9 +1954,8 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
 
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
-  if (!data) return null;
+  if (isEdit && !data) return null;
 
-  const [places, epochs] = data;
   const cancelTo = isEdit && eventId ? `/events/${eventId}` : '/events';
   return (
     <EntityFormShell title={isEdit ? 'Modifica evento' : 'Nuovo evento'} backTo={cancelTo}>
@@ -1916,9 +1966,6 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
           <strong className="d-block mb-1">Data fuori dall’intervallo dell’epoca</strong>
           {dateConflictMessage} Modifica la data o seleziona un’altra epoca.
         </div>
-      )}
-      {(places.length === 0 || epochs.length === 0) && (
-        <div className="alert alert-warning">Per creare un evento servono almeno un luogo e un'epoca.</div>
       )}
       <form className={validated ? 'was-validated' : ''} noValidate onSubmit={submit}>
         <div className="row g-3">
@@ -1931,20 +1978,31 @@ function EventForm({ mode }: { mode: 'create' | 'edit'; }) {
             <RarityInput value={draft.rarity} onChange={(rarity) => setDraft({ ...draft, rarity })} />
           </div>
           <div className="col-md-6">
-            <label className="form-label" htmlFor="place">Luogo<RequiredMark /></label>
-            <select className="form-select" id="place" required value={draft.place_id} onChange={(event) => setDraft({ ...draft, place_id: event.target.value })}>
-              <option value="">Scegli luogo</option>
-              {places.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}
-            </select>
-            <div className="invalid-feedback">Seleziona un luogo.</div>
+            <EntitySearchPicker
+              id="place"
+              label="Luogo"
+              value={selectedPlace}
+              search={api.searchPlaces}
+              onSelect={(place) => {
+                setSelectedPlace(place);
+                setDraft((current) => ({ ...current, place_id: String(place.id) }));
+              }}
+            />
+            {validated && !draft.place_id && <div className="text-danger small">Seleziona un luogo.</div>}
           </div>
           <div className="col-md-6">
-            <label className="form-label" htmlFor="epoch">Epoca<RequiredMark /></label>
-            <select className="form-select" id="epoch" required value={draft.epoch_id} onChange={(event) => setDraft({ ...draft, epoch_id: event.target.value })}>
-              <option value="">Scegli epoca</option>
-              {epochs.map((epoch) => <option key={epoch.id} value={epoch.id}>{epoch.name}</option>)}
-            </select>
-            <div className="invalid-feedback">Seleziona un'epoca.</div>
+            <EntitySearchPicker
+              id="epoch"
+              label="Epoca"
+              value={selectedEpoch ? epochResult(selectedEpoch) : null}
+              search={api.searchEpochs}
+              onSelect={async (epoch) => {
+                const detail = await api.epoch(epoch.id);
+                setSelectedEpoch(detail);
+                setDraft((current) => ({ ...current, epoch_id: String(epoch.id) }));
+              }}
+            />
+            {validated && !draft.epoch_id && <div className="text-danger small">Seleziona un'epoca.</div>}
           </div>
           <div className="col-md-4">
             <label className="form-label" htmlFor="year">Anno</label>
@@ -2037,7 +2095,6 @@ function PersonDetail() {
           api.personPlaces(personId),
           api.personEvents(personId),
           api.personGroups(personId),
-          api.media(personId),
         ])
         : Promise.resolve(null),
     [personId, parsedPersonId],
@@ -2053,10 +2110,10 @@ function PersonDetail() {
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [person, places, events, groups, media] = data;
+  const [person, places, events, groups] = data;
 
   return (
-    <DetailShell title={person.alias} entityType="person" entityId={person.id} media={media} onMediaChanged={reload} onDelete={remove}>
+    <DetailShell title={person.alias} entityType="person" entityId={person.id} media={person.media_ids} onMediaChanged={reload} onDelete={remove}>
       <InfoGrid
         items={[
           ['Nome', [person.name, person.surname].filter(Boolean).join(' ') || 'Non indicato'],
@@ -2081,7 +2138,7 @@ function PlaceDetail() {
   const { data, loading, error, reload } = useAsync(
     () =>
       parsedPlaceId
-        ? Promise.all([api.place(placeId), api.placePeople(placeId), api.placeEvents(placeId), api.media(placeId)])
+        ? Promise.all([api.place(placeId), api.placePeople(placeId), api.placeEvents(placeId)])
         : Promise.resolve(null),
     [placeId, parsedPlaceId],
   );
@@ -2101,10 +2158,10 @@ function PlaceDetail() {
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [place, people, events, media] = data;
+  const [place, people, events] = data;
 
   return (
-    <DetailShell title={place.name} entityType="place" entityId={place.id} media={media} onMediaChanged={reload} onDelete={remove}>
+    <DetailShell title={place.name} entityType="place" entityId={place.id} media={place.media_ids} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
       <InfoGrid
         items={[
@@ -2131,7 +2188,6 @@ function EpochDetail() {
       api.epoch(epochId),
       api.epochEvents(epochId),
       api.epochGroups(epochId),
-      api.media(epochId),
     ]) : Promise.resolve(null)),
     [epochId, parsedEpochId],
   );
@@ -2151,10 +2207,10 @@ function EpochDetail() {
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [epoch, events, groups, media] = data;
+  const [epoch, events, groups] = data;
 
   return (
-    <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} media={media} onMediaChanged={reload} onDelete={remove}>
+    <DetailShell title={epoch.name} entityType="epoch" entityId={epoch.id} media={epoch.media_ids} onMediaChanged={reload} onDelete={remove}>
       {deleteError && <ErrorAlert message={deleteError} />}
       <InfoGrid items={[
         ['Data di inizio', formatPartialDate(epochStart(epoch), 'Non indicata')],
@@ -2174,7 +2230,7 @@ function EventDetail() {
   const eventId = parsedEventId ?? 0;
   const navigate = useNavigate();
   const { data, loading, error, reload } = useAsync(
-    () => (parsedEventId ? Promise.all([api.event(eventId), api.eventParticipants(eventId), api.media(eventId)]) : Promise.resolve(null)),
+    () => (parsedEventId ? Promise.all([api.event(eventId), api.eventParticipants(eventId)]) : Promise.resolve(null)),
     [eventId, parsedEventId],
   );
 
@@ -2188,10 +2244,10 @@ function EventDetail() {
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [event, participants, media] = data;
+  const [event, participants] = data;
 
   return (
-    <DetailShell title={event.title} entityType="event" entityId={event.id} media={media} onMediaChanged={reload} onDelete={remove}>
+    <DetailShell title={event.title} entityType="event" entityId={event.id} media={event.media_ids} onMediaChanged={reload} onDelete={remove}>
       <InfoGrid
         items={[
           ['Data', formatPartialDate(event)],
@@ -2220,7 +2276,6 @@ function GroupDetail() {
       api.group(groupId),
       api.groupPeople(groupId),
       api.groupEpochs(groupId),
-      api.media(groupId),
     ]) : Promise.resolve(null)),
     [groupId, parsedGroupId],
   );
@@ -2240,14 +2295,14 @@ function GroupDetail() {
   if (loading) return <LoadingIndicator variant="page" appearance="logo" />;
   if (error) return <ErrorAlert message={error} />;
   if (!data) return null;
-  const [group, people, epochs, media] = data;
+  const [group, people, epochs] = data;
 
   return (
     <DetailShell
       title={group.name}
       entityType="group"
       entityId={group.id}
-      media={media}
+      media={group.media_ids}
       onMediaChanged={reload}
       onDelete={remove}
     >
@@ -2276,7 +2331,7 @@ export function DetailShell({
   title: string;
   entityType: EntityType;
   entityId: number;
-  media: MediaAsset[];
+  media: number[];
   onMediaChanged: () => void;
   onDelete: () => void;
   children: ReactNode;
@@ -2348,7 +2403,7 @@ export function MediaSection({
   onError,
 }: {
   pullableId: number;
-  initialMedia: MediaAsset[];
+  initialMedia: number[];
   onChanged: () => void;
   onError?: (message: string | null) => void;
 }) {
@@ -2386,12 +2441,12 @@ export function MediaSection({
     }
   }
 
-  async function remove(asset: MediaAsset) {
+  async function remove(mediaId: number) {
     if (!window.confirm('Eliminare definitivamente questa immagine?')) return;
-    setDeletingId(asset.id);
+    setDeletingId(mediaId);
     setError(null);
     try {
-      await api.deleteMedia(asset.id);
+      await api.deleteMedia(mediaId);
       onChanged();
     } catch (err) {
       setError(formatError(err, 'Non è stato possibile eliminare l’immagine.'));
@@ -2428,14 +2483,14 @@ export function MediaSection({
         ) : (
           <div className="carousel slide media-carousel h-100" aria-label="Immagini allegate">
             <div className="carousel-inner h-100">
-              {initialMedia.map((asset, index) => (
-                <div className={`carousel-item h-100${index === displayedIndex ? ' active' : ''}`} key={`${asset.id}:${asset.created_at}`}>
+              {initialMedia.map((mediaId, index) => (
+                <div className={`carousel-item h-100${index === displayedIndex ? ' active' : ''}`} key={mediaId}>
                   <AuthenticatedMedia
-                    asset={asset}
+                    mediaId={mediaId}
                     position={index + 1}
                     total={initialMedia.length}
-                    deleting={deletingId === asset.id}
-                    onDelete={() => remove(asset)}
+                    deleting={deletingId === mediaId}
+                    onDelete={() => remove(mediaId)}
                   />
                 </div>
               ))}
@@ -2449,14 +2504,14 @@ export function MediaSection({
                   <span className="carousel-control-next-icon" aria-hidden="true" />
                 </button>
                 <div className="carousel-indicators media-carousel-indicators">
-                  {initialMedia.map((asset, index) => (
+                  {initialMedia.map((mediaId, index) => (
                     <button
                       className={index === displayedIndex ? 'active' : ''}
                       type="button"
                       onClick={() => setActiveIndex(index)}
                       aria-current={index === displayedIndex ? 'true' : undefined}
                       aria-label={`Mostra immagine ${index + 1}`}
-                      key={`${asset.id}:${asset.created_at}`}
+                      key={mediaId}
                     />
                   ))}
                 </div>
@@ -2480,20 +2535,19 @@ export function MediaSection({
   );
 }
 
-function useAuthenticatedMediaUrl(asset?: MediaAsset) {
+function useAuthenticatedMediaUrl(mediaId?: number) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
-  const identity = asset ? `${asset.id}:${asset.created_at}` : null;
 
   useEffect(() => {
     let active = true;
     let createdUrl: string | null = null;
     setObjectUrl(null);
     setError(false);
-    if (!asset) return () => undefined;
+    if (!mediaId) return () => undefined;
 
     api
-      .mediaBlob(asset.id, asset.created_at)
+      .mediaBlob(mediaId)
       .then((blob) => {
         if (!active) return;
         createdUrl = URL.createObjectURL(blob);
@@ -2507,13 +2561,13 @@ function useAuthenticatedMediaUrl(asset?: MediaAsset) {
       active = false;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [identity]);
+  }, [mediaId]);
 
   return { objectUrl, error };
 }
 
-function EntityPreview({ asset, label }: { asset?: MediaAsset; label: string; }) {
-  const { objectUrl, error } = useAuthenticatedMediaUrl(asset);
+function EntityPreview({ mediaId, label }: { mediaId?: number; label: string; }) {
+  const { objectUrl, error } = useAuthenticatedMediaUrl(mediaId);
   return (
     <span className="entity-preview d-flex align-items-center justify-content-center">
       {objectUrl && !error ? (
@@ -2521,7 +2575,7 @@ function EntityPreview({ asset, label }: { asset?: MediaAsset; label: string; })
           <img className="entity-preview-backdrop" src={objectUrl} alt="" aria-hidden="true" />
           <img className="entity-preview-image" src={objectUrl} alt={`Anteprima di ${label}`} />
         </>
-      ) : asset && !error ? (
+      ) : mediaId && !error ? (
         <LoadingIndicator variant="media" appearance="bootstrap" label={`Caricamento anteprima di ${label}`} />
       ) : (
         <span role="img" aria-label="Nessuna immagine">
@@ -2533,19 +2587,19 @@ function EntityPreview({ asset, label }: { asset?: MediaAsset; label: string; })
 }
 
 export function AuthenticatedMedia({
-  asset,
+  mediaId,
   position = 1,
   total = 1,
   deleting = false,
   onDelete,
 }: {
-  asset: MediaAsset;
+  mediaId: number;
   position?: number;
   total?: number;
   deleting?: boolean;
   onDelete?: () => void;
 }) {
-  const { objectUrl, error } = useAuthenticatedMediaUrl(asset);
+  const { objectUrl, error } = useAuthenticatedMediaUrl(mediaId);
 
   return (
     <div className="media-slide h-100">
@@ -2601,6 +2655,56 @@ function placeResult(place: Place): EntitySearchResult {
 
 function epochResult(epoch: Epoch): EntitySearchResult {
   return { id: epoch.id, title: epoch.name, subtitle: formatEpochRange(epoch) || epoch.description };
+}
+
+function EntitySearchPicker({
+  id,
+  label,
+  value,
+  search,
+  onSelect,
+}: {
+  id: string;
+  label: string;
+  value: EntitySearchResult | null;
+  search: (query: string, limit?: number) => Promise<EntitySearchResult[]>;
+  onSelect: (result: EntitySearchResult) => void | Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const selectedIds = useMemo(() => new Set(value ? [value.id] : []), [value?.id]);
+
+  async function select(result: EntitySearchResult) {
+    setSelecting(true);
+    setError(null);
+    try {
+      await onSelect(result);
+    } catch (err) {
+      setError(formatError(err, 'Non è stato possibile selezionare l’elemento.'));
+    } finally {
+      setSelecting(false);
+    }
+  }
+
+  return (
+    <div>
+      {value && (
+        <div className="border rounded bg-body-tertiary p-3 mb-2">
+          <span className="fw-semibold d-block">{value.title}</span>
+          {value.subtitle && <span className="small text-secondary">{value.subtitle}</span>}
+        </div>
+      )}
+      <RelationshipSearchSelector
+        id={id}
+        label={`${value ? 'Sostituisci' : 'Seleziona'} ${label.toLowerCase()} *`}
+        search={search}
+        selectedIds={selectedIds}
+        onSelect={(result) => { void select(result); }}
+      />
+      {selecting && <LoadingIndicator variant="inline" label="Selezione in corso" />}
+      {error && <ErrorAlert message={error} />}
+    </div>
+  );
 }
 
 export function RelationshipSearchSelector({
@@ -3152,22 +3256,27 @@ function EventListSection({ title, events }: { title: string; events: Event[]; }
 
 function SearchPage() {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<Page<SearchResult> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!query.trim()) return;
+  async function search(page: number) {
+    const term = query.trim();
+    if (!term) return;
     setLoading(true);
     setError(null);
     try {
-      setResults(await api.search(query.trim()));
+      setResults(await api.search(term, page, 20));
     } catch (err) {
       setError(formatError(err, 'Non è stato possibile completare la ricerca.'));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await search(1);
   }
 
   return (
@@ -3186,9 +3295,9 @@ function SearchPage() {
       </form>
       {loading && <LoadingIndicator variant="section" appearance="logo" />}
       {error && <ErrorAlert message={error} />}
-      {!loading && results.length === 0 && <EmptyState>Nessun risultato da mostrare.</EmptyState>}
+      {!loading && (results?.items.length ?? 0) === 0 && <EmptyState>Nessun risultato da mostrare.</EmptyState>}
       <div className="list-group">
-        {results.map((result) => (
+        {results?.items.map((result) => (
           <Link className="list-group-item list-group-item-action" to={detailPath(result.entity_type, result.id)} key={`${result.entity_type}-${result.id}`}>
             <span className="badge text-bg-light me-2">{entityLabels[result.entity_type]}</span>
             <span className="fw-semibold">{result.title}</span>
@@ -3196,6 +3305,7 @@ function SearchPage() {
           </Link>
         ))}
       </div>
+      <Pagination page={results?.page ?? 1} pageData={results} onPage={(page) => { void search(page); }} />
     </section>
   );
 }

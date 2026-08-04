@@ -13,14 +13,15 @@ The FastAPI backend is maintained as a separate repository and is required for a
 - Account dropdown for profile, theme, administrator, and logout actions.
 - Administrator user management with a visibly protected, read-only `Proprietario` account.
 - Bootstrap light and dark modes with system-aware defaults and a persistent user override.
-- Dashboard with content totals and a daily item.
+- Dashboard with aggregate content totals, recent content, and a daily item.
+- Server-filtered, sorted, and paginated list views with state persisted in hash-route query parameters.
 - Routed list, detail, create, and edit views for every entity type.
 - Content-focused detail headers that keep internal numeric identifiers out of page text.
 - Relationship editing from entity detail pages.
 - Dedicated searchable relationship-management pages, with read-only links on entity details.
 - Independent people and epoch membership management for Cerchie, with reciprocal links on related details.
-- Authenticated image upload, display, deletion, and fixed list previews.
-- Cross-entity search.
+- Authenticated image upload, display, deletion, and fixed list previews loaded from entity media IDs.
+- Paginated cross-entity search.
 - Weighted random lottery and item-of-the-day activity.
 - Seasonal designer branding selected from the current date.
 - Italian partial-date formatting and epoch-range checks shared by epoch and event forms.

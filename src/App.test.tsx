@@ -57,6 +57,10 @@ function json(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 }
 
+function page<T>(items: T[], pageNumber = 1, pageSize = 18, total = items.length) {
+  return { items, total, page: pageNumber, page_size: pageSize };
+}
+
 describe('App', () => {
   let colorScheme: ReturnType<typeof installColorScheme>;
 
@@ -94,16 +98,29 @@ describe('App', () => {
           });
         }
         if (url.endsWith('/api/auth/logout')) return Promise.resolve(new Response(null, { status: 204 }));
-        if (url.endsWith('/api/me')) return json(user);
-        if (url.endsWith('/api/people')) return json([]);
-        if (url.endsWith('/api/places')) return json([]);
-        if (url.endsWith('/api/epochs')) return json([]);
-        if (url.endsWith('/api/events')) return json([]);
-        if (url.endsWith('/api/groups')) return json([]);
+        if (url.endsWith('/api/auth/me')) return json(user);
+        if (url.includes('/api/pullables/counts')) return json({ people: 0, places: 0, epochs: 0, events: 1, groups: 0 });
+        if (url.includes('/api/pullables/recent')) return json(page([]));
+        if (/\/api\/(people|places|epochs|events|groups)\?/.test(url)) return json(page([]));
         if (url.includes('/api/media/previews?')) return json([]);
         if (url.includes('/api/pulls/daily')) {
           return json({ entity_type: 'event', id: 1, title: 'Elemento demo', rarity: 1, mode: 'daily' });
         }
+        if (url.endsWith('/api/events/1')) return json({
+          id: 1,
+          title: 'Elemento demo',
+          description: null,
+          place_id: 2,
+          epoch_id: 3,
+          rarity: 1,
+          media_ids: [],
+          created_at: '2026-07-01T10:00:00Z',
+          updated_at: '2026-07-01T10:00:00Z',
+          created_by: 1,
+          updated_by: 1,
+          place: null,
+          epoch: null,
+        });
         return json({});
       }),
     );
@@ -142,6 +159,7 @@ describe('App', () => {
       updated_at: `2026-07-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     }));
     const newestPlace: Place = {
       id: 300,
@@ -153,12 +171,13 @@ describe('App', () => {
       updated_at: '2026-07-11T10:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
-    vi.spyOn(api, 'people').mockResolvedValue([]);
-    vi.spyOn(api, 'places').mockResolvedValue([newestPlace]);
-    vi.spyOn(api, 'epochs').mockResolvedValue([]);
-    vi.spyOn(api, 'events').mockResolvedValue([]);
-    vi.spyOn(api, 'groups').mockResolvedValue(groups);
+    vi.spyOn(api, 'pullableCounts').mockResolvedValue({ people: 0, places: 1, epochs: 0, events: 0, groups: 10 });
+    vi.spyOn(api, 'recentPullables').mockResolvedValue(page([
+      { entity_type: 'place' as const, id: newestPlace.id, title: newestPlace.name, created_at: newestPlace.created_at },
+      ...groups.slice(5).reverse().map((group) => ({ entity_type: 'group' as const, id: group.id, title: group.name, created_at: group.created_at })),
+    ].slice(0, 5), 1, 5, 11));
     vi.spyOn(api, 'dailyPull').mockResolvedValue({
       entity_type: 'group',
       id: 109,
@@ -166,7 +185,7 @@ describe('App', () => {
       rarity: 2,
       mode: 'daily',
     });
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    vi.spyOn(api, 'group').mockResolvedValue(groups[9]);
 
     render(<App />);
 
@@ -193,7 +212,7 @@ describe('App', () => {
     const regular = { ...user, is_admin: false, is_owner: false };
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       if (String(input).endsWith('/api/maintenance/status')) return json(availableMaintenance);
-      if (String(input).endsWith('/api/me')) return json(regular);
+      if (String(input).endsWith('/api/auth/me')) return json(regular);
       return json({});
     }));
     window.location.hash = '#/admin';
@@ -301,7 +320,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/api/maintenance/status')) return json(availableMaintenance);
-      if (url.endsWith('/api/me')) return json(otherAdmin);
+      if (url.endsWith('/api/auth/me')) return json(otherAdmin);
       return json({});
     }));
     vi.spyOn(api, 'adminUser').mockResolvedValue({
@@ -634,15 +653,13 @@ describe('App', () => {
   it('renders the profile activity and changes the password without ending the session', async () => {
     vi.spyOn(api, 'profile').mockResolvedValue({
       user,
-      recent_activity: [
-        {
+      activity: page([{
           entity_type: 'event',
           entity_id: 7,
           title: 'Viaggio memorabile',
           action: 'updated',
           occurred_at: '2026-07-17T10:00:00Z',
-        },
-      ],
+        }], 1, 10),
     });
     const changePassword = vi.spyOn(api, 'changePassword').mockResolvedValue(undefined);
     window.location.hash = '#/profile';
@@ -671,8 +688,9 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [21],
     };
-    vi.spyOn(api, 'people').mockResolvedValue([
+    vi.spyOn(api, 'people').mockResolvedValue(page([
       {
         id: 1,
         alias: 'Dino',
@@ -683,11 +701,14 @@ describe('App', () => {
         description: 'Descrizione della persona',
         ...metadata,
       } as Person,
-    ]);
-    vi.spyOn(api, 'places').mockResolvedValue([
+    ]));
+    const places = [
       { id: 2, name: 'Parchino', address: 'Via Dimostrativa #2', description: null, ...metadata },
-    ]);
-    vi.spyOn(api, 'epochs').mockResolvedValue([
+    ];
+    const listPlaces = vi.spyOn(api, 'places').mockImplementation(async (params) => (
+      page(params?.q ? places.filter((place) => place.address?.toLowerCase().includes(params.q!.toLowerCase())) : places)
+    ));
+    vi.spyOn(api, 'epochs').mockResolvedValue(page([
       {
         id: 3,
         name: 'Post-Covid',
@@ -697,8 +718,8 @@ describe('App', () => {
         end_month: 7,
         ...metadata,
       },
-    ]);
-    vi.spyOn(api, 'events').mockResolvedValue([
+    ]));
+    vi.spyOn(api, 'events').mockResolvedValue(page([
       {
         id: 4,
         title: 'APPoti APPiedi',
@@ -712,8 +733,8 @@ describe('App', () => {
         epoch: { id: 3, name: 'Post-Covid', description: null, ...metadata },
         ...metadata,
       } as Event,
-    ]);
-    vi.spyOn(api, 'groups').mockResolvedValue([
+    ]));
+    vi.spyOn(api, 'groups').mockResolvedValue(page([
       {
         id: 5,
         name: 'Cerchia Demo',
@@ -722,16 +743,7 @@ describe('App', () => {
         epoch_count: 2,
         ...metadata,
       } as GroupSummary,
-    ]);
-    vi.spyOn(api, 'mediaPreviews').mockImplementation(async (ids) =>
-      ids.map((id) => ({
-        id: id + 20,
-        pullable_id: id,
-        filename: 'non-visibile.png',
-        content_type: 'image/png',
-        created_at: `2026-07-17T10:00:0${id}Z`,
-      })),
-    );
+    ]));
     vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['preview'], { type: 'image/png' }));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:entity-preview');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
@@ -793,8 +805,9 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
-    vi.spyOn(api, 'places').mockResolvedValue([
+    const places = [
       {
         id: 1,
         name: 'Luogo con indirizzo',
@@ -809,8 +822,10 @@ describe('App', () => {
         description: 'Secondo luogo',
         ...metadata,
       },
-    ]);
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    ];
+    const listPlaces = vi.spyOn(api, 'places').mockImplementation(async (params) => (
+      page(params?.q ? places.filter((place) => place.address?.toLowerCase().includes(params.q!.toLowerCase())) : places)
+    ));
     window.location.hash = '#/places';
 
     render(<App />);
@@ -823,8 +838,33 @@ describe('App', () => {
     fireEvent.change(screen.getByPlaceholderText('Filtra per nome, indirizzo o descrizione'), {
       target: { value: 'torino' },
     });
-    expect(screen.getByText('Luogo con indirizzo')).toBeInTheDocument();
-    expect(screen.queryByText('Luogo senza indirizzo')).not.toBeInTheDocument();
+    await waitFor(() => expect(listPlaces).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'torino' })));
+    await waitFor(() => expect(screen.queryByText('Luogo senza indirizzo')).not.toBeInTheDocument());
+  });
+
+  it('restores collection pagination, filtering, and sorting from the hash query', async () => {
+    const listPlaces = vi.spyOn(api, 'places').mockResolvedValue(page([], 2, 18, 40));
+    window.location.hash = '#/places?page=2&q=torino&sort=updated_at&order=desc';
+
+    render(<App />);
+
+    await waitFor(() => expect(listPlaces).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 2,
+      pageSize: 18,
+      q: 'torino',
+      sort: 'updated_at',
+      order: 'desc',
+    })));
+    expect(screen.getByPlaceholderText('Filtra per nome, indirizzo o descrizione')).toHaveValue('torino');
+    expect(screen.getByRole('combobox', { name: 'Ordina per' })).toHaveValue('updated_at');
+    expect(screen.getByText('Pagina 2 di 3')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ordine decrescente, passa a crescente' }));
+    await waitFor(() => {
+      expect(window.location.hash).toContain('sort=updated_at');
+      expect(window.location.hash).not.toContain('page=2');
+      expect(window.location.hash).not.toContain('order=desc');
+    });
   });
 
   it('submits a blank optional address as null from the place form', async () => {
@@ -838,12 +878,12 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     } as Place;
     const createPlace = vi.spyOn(api, 'createPlace').mockResolvedValue(savedPlace);
     vi.spyOn(api, 'place').mockResolvedValue(savedPlace);
     vi.spyOn(api, 'placePeople').mockResolvedValue([]);
     vi.spyOn(api, 'placeEvents').mockResolvedValue([]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     window.location.hash = '#/places/new';
 
     render(<App />);
@@ -874,11 +914,11 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     } as Place;
     vi.spyOn(api, 'place').mockResolvedValue(place);
     vi.spyOn(api, 'placePeople').mockResolvedValue([]);
     vi.spyOn(api, 'placeEvents').mockResolvedValue([]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     window.location.hash = '#/places/51';
 
     render(<App />);
@@ -898,12 +938,12 @@ describe('App', () => {
       updated_at: '2026-07-31T10:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     } as Group;
     const createGroup = vi.spyOn(api, 'createGroup').mockResolvedValue(savedGroup);
-    vi.spyOn(api, 'group').mockResolvedValue(savedGroup);
+    vi.spyOn(api, 'group').mockResolvedValue({ ...savedGroup, people_count: 0, epoch_count: 0 });
     vi.spyOn(api, 'groupPeople').mockResolvedValue([]);
     vi.spyOn(api, 'groupEpochs').mockResolvedValue([]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     window.location.hash = '#/groups/new';
 
     render(<App />);
@@ -928,6 +968,7 @@ describe('App', () => {
       updated_at: '2026-07-31T10:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
     const group = {
       id: 61,
@@ -943,12 +984,11 @@ describe('App', () => {
       { id: 3, name: 'Epoca Uno', ...metadata },
       { id: 4, name: 'Epoca Due', ...metadata },
     ] as Epoch[];
-    vi.spyOn(api, 'group').mockResolvedValue(group);
+    vi.spyOn(api, 'group').mockResolvedValue({ ...group, people_count: 1, epoch_count: 1 });
     vi.spyOn(api, 'groupPeople').mockResolvedValue([people[0]]);
     vi.spyOn(api, 'groupEpochs').mockResolvedValue([epochs[0]]);
     vi.spyOn(api, 'searchPeople').mockResolvedValue([{ id: 2, title: 'Persona Due', subtitle: null }]);
     vi.spyOn(api, 'searchEpochs').mockResolvedValue([{ id: 4, title: 'Epoca Due', subtitle: null }]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     const replacePeople = vi.spyOn(api, 'replaceGroupPeople').mockResolvedValue(people);
     const replaceEpochs = vi.spyOn(api, 'replaceGroupEpochs').mockResolvedValue(epochs);
     window.location.hash = '#/groups/61/links';
@@ -979,6 +1019,7 @@ describe('App', () => {
       updated_at: '2026-07-31T10:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
     const group = { id: 70, name: 'Cerchia reciproca', description: null, ...metadata } as Group;
     const person = {
@@ -993,7 +1034,6 @@ describe('App', () => {
     vi.spyOn(api, 'personPlaces').mockResolvedValue([]);
     vi.spyOn(api, 'personEvents').mockResolvedValue([]);
     vi.spyOn(api, 'personGroups').mockResolvedValue([group]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     window.location.hash = '#/people/71';
 
     render(<App />);
@@ -1018,14 +1058,14 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
-    vi.spyOn(api, 'people').mockResolvedValue([
+    vi.spyOn(api, 'people').mockResolvedValue(page([
       { id: 1, alias: 'Positiva', sex: 'female', connotation: 'positive', ...metadata },
       { id: 2, alias: 'Negativa', sex: 'male', connotation: 'negative', ...metadata },
       { id: 3, alias: 'Neutra', sex: 'other', connotation: 'neutral', ...metadata },
       { id: 4, alias: 'Sconosciuta', sex: 'unknown', connotation: 'unknown', ...metadata },
-    ] as Person[]);
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    ] as Person[]));
     window.location.hash = '#/people';
 
     render(<App />);
@@ -1045,6 +1085,7 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
     const place = { id: 20, name: 'Luogo', ...metadata };
     const epoch = { id: 21, name: 'Epoca', ...metadata };
@@ -1056,13 +1097,12 @@ describe('App', () => {
       description: null,
       ...metadata,
     };
-    vi.spyOn(api, 'events').mockResolvedValue([
+    vi.spyOn(api, 'events').mockResolvedValue(page([
       { ...baseEvent, id: 1, title: 'Solo anno', year: 2025, month: null, day: null },
       { ...baseEvent, id: 2, title: 'Anno e mese', year: 2025, month: 7, day: null },
       { ...baseEvent, id: 3, title: 'Data completa', year: 2025, month: 7, day: 14 },
       { ...baseEvent, id: 4, title: 'Data ignota', year: null, month: null, day: null },
-    ] as Event[]);
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    ] as Event[]));
     window.location.hash = '#/events';
 
     render(<App />);
@@ -1081,6 +1121,7 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
     const epoch = {
       id: 30,
@@ -1137,6 +1178,7 @@ describe('App', () => {
       updated_at: '2026-07-17T09:00:00Z',
       created_by: 1,
       updated_by: 1,
+      media_ids: [],
     };
     const place = { id: 20, name: 'Luogo', description: null, ...metadata };
     const epoch = {
@@ -1147,8 +1189,6 @@ describe('App', () => {
       end_year: 2025,
       ...metadata,
     } as Epoch;
-    vi.spyOn(api, 'places').mockResolvedValue([place]);
-    vi.spyOn(api, 'epochs').mockResolvedValue([epoch]);
     const savedEvent = {
       id: 40,
       title: 'Evento nuovo',
@@ -1164,16 +1204,21 @@ describe('App', () => {
     } as Event;
     const createEvent = vi.spyOn(api, 'createEvent').mockResolvedValue(savedEvent);
     vi.spyOn(api, 'event').mockResolvedValue(savedEvent);
+    vi.spyOn(api, 'searchPlaces').mockResolvedValue([{ id: place.id, title: place.name, subtitle: null }]);
+    vi.spyOn(api, 'searchEpochs').mockResolvedValue([{ id: epoch.id, title: epoch.name, subtitle: null }]);
+    vi.spyOn(api, 'epoch').mockResolvedValue(epoch);
     vi.spyOn(api, 'eventParticipants').mockResolvedValue([]);
-    vi.spyOn(api, 'media').mockResolvedValue([]);
     window.location.hash = '#/events/new';
 
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Nuovo evento' });
     fireEvent.change(screen.getByLabelText(/Titolo/), { target: { value: 'Evento nuovo' } });
-    fireEvent.change(screen.getByLabelText(/Luogo/), { target: { value: String(place.id) } });
-    fireEvent.change(screen.getByLabelText(/Epoca/), { target: { value: String(epoch.id) } });
+    fireEvent.change(screen.getByLabelText(/Seleziona luogo/), { target: { value: 'Luogo' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Luogo/ }));
+    fireEvent.change(screen.getByLabelText(/Seleziona epoca/), { target: { value: 'Epoca' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Epoca 2025/ }));
+    await waitFor(() => expect(api.epoch).toHaveBeenCalledWith(epoch.id));
     fireEvent.change(screen.getByLabelText('Anno'), { target: { value: '2024' } });
 
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -1192,10 +1237,20 @@ describe('App', () => {
   });
 
   it('shows the image placeholder when a listed entity has no media', async () => {
-    vi.spyOn(api, 'people').mockResolvedValue([
-      { id: 1, alias: 'Senza foto', sex: 'unknown', connotation: 'unknown' } as Person,
-    ]);
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([]);
+    vi.spyOn(api, 'people').mockResolvedValue(page([
+      {
+        id: 1,
+        alias: 'Senza foto',
+        sex: 'unknown',
+        connotation: 'unknown',
+        rarity: 1,
+        created_at: '2026-07-17T09:00:00Z',
+        updated_at: '2026-07-17T09:00:00Z',
+        created_by: 1,
+        updated_by: 1,
+        media_ids: [],
+      } as Person,
+    ]));
     window.location.hash = '#/people';
 
     render(<App />);
@@ -1211,10 +1266,9 @@ describe('App', () => {
       content_type: 'image/png',
       created_at: '2026-07-15T10:00:00Z',
     } as MediaAsset;
-    vi.spyOn(api, 'people').mockResolvedValue([
-      { id: 1, alias: 'Con foto', sex: 'unknown', connotation: 'unknown' } as Person,
-    ]);
-    vi.spyOn(api, 'mediaPreviews').mockResolvedValue([asset]);
+    vi.spyOn(api, 'people').mockResolvedValue(page([
+      { id: 1, alias: 'Con foto', sex: 'unknown', connotation: 'unknown', media_ids: [asset.id] } as Person,
+    ]));
     vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
     window.location.hash = '#/people';
 
@@ -1235,11 +1289,6 @@ describe('App', () => {
       created_at: '2026-07-15T10:00:00Z',
     } as MediaAsset;
     vi.spyOn(api, 'mediaBlob').mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
-    const replacementAsset = {
-      ...asset,
-      filename: 'seconda.png',
-      created_at: '2026-07-15T11:00:00Z',
-    };
     const createObjectURL = vi
       .fn()
       .mockReturnValueOnce('blob:authenticated-image')
@@ -1248,7 +1297,7 @@ describe('App', () => {
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
 
-    const { rerender, unmount } = render(<AuthenticatedMedia asset={asset} />);
+    const { rerender, unmount } = render(<AuthenticatedMedia mediaId={asset.id} />);
 
     const image = await screen.findByRole('img', { name: 'Immagine 1 di 1' });
     expect(image).toHaveAttribute('src', 'blob:authenticated-image');
@@ -1257,10 +1306,10 @@ describe('App', () => {
       'aria-hidden',
       'true',
     );
-    rerender(<AuthenticatedMedia asset={replacementAsset} />);
+    rerender(<AuthenticatedMedia mediaId={10} />);
     await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toHaveAttribute('src', 'blob:replacement-image'));
-    expect(api.mediaBlob).toHaveBeenNthCalledWith(1, 9, '2026-07-15T10:00:00Z');
-    expect(api.mediaBlob).toHaveBeenNthCalledWith(2, 9, '2026-07-15T11:00:00Z');
+    expect(api.mediaBlob).toHaveBeenNthCalledWith(1, 9);
+    expect(api.mediaBlob).toHaveBeenNthCalledWith(2, 10);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:authenticated-image');
     unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:replacement-image');
@@ -1276,7 +1325,7 @@ describe('App', () => {
     } as MediaAsset;
     vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
 
-    render(<AuthenticatedMedia asset={asset} position={2} total={3} />);
+    render(<AuthenticatedMedia mediaId={asset.id} position={2} total={3} />);
 
     const loader = screen.getByRole('status', { name: 'Caricamento immagine 2 di 3' });
     expect(loader).toHaveClass('loading-indicator-media');
@@ -1296,7 +1345,7 @@ describe('App', () => {
     } as MediaAsset;
     vi.spyOn(api, 'mediaBlob').mockReturnValue(new Promise(() => undefined));
 
-    render(<AuthenticatedMedia asset={asset} deleting onDelete={vi.fn()} />);
+    render(<AuthenticatedMedia mediaId={asset.id} deleting onDelete={vi.fn()} />);
 
     const deleteButton = screen.getByRole('button', { name: 'Elimina immagine 1 di 1' });
     expect(deleteButton.querySelector('.spinner-border')).toBeInTheDocument();
@@ -1356,7 +1405,7 @@ describe('App', () => {
     const deleteMedia = vi.spyOn(api, 'deleteMedia').mockResolvedValue(undefined);
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const onChanged = vi.fn();
-    const { rerender } = render(<MediaSection pullableId={1} initialMedia={assets} onChanged={onChanged} />);
+    const { rerender } = render(<MediaSection pullableId={1} initialMedia={assets.map((asset) => asset.id)} onChanged={onChanged} />);
 
     await waitFor(() => expect(screen.getByRole('img', { name: 'Immagine 1 di 2' })).toBeInTheDocument());
     expect(screen.getByLabelText('Immagine precedente')).toBeInTheDocument();
@@ -1376,7 +1425,7 @@ describe('App', () => {
     await waitFor(() => expect(deleteMedia).toHaveBeenCalledWith(22));
     expect(onChanged).toHaveBeenCalledOnce();
 
-    rerender(<MediaSection pullableId={1} initialMedia={[assets[0]]} onChanged={onChanged} />);
+    rerender(<MediaSection pullableId={1} initialMedia={[assets[0].id]} onChanged={onChanged} />);
     await waitFor(() => expect(screen.queryByLabelText('Immagine successiva')).not.toBeInTheDocument());
     expect(screen.queryByLabelText('Mostra immagine 1')).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Immagine 1 di 1' })).toBeInTheDocument();

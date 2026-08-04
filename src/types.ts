@@ -37,7 +37,14 @@ export interface ProfileActivity {
 
 export interface Profile {
   user: User;
-  recent_activity: ProfileActivity[];
+  activity: Page<ProfileActivity>;
+}
+
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface AdminUser extends User {
@@ -110,6 +117,7 @@ export interface Editable {
   updated_at: string;
   created_by: number | null;
   updated_by: number | null;
+  media_ids: number[];
 }
 
 export interface Person extends Editable {
@@ -165,6 +173,21 @@ export interface SearchResult {
   id: number;
   title: string;
   subtitle?: string | null;
+}
+
+export interface PullableCounts {
+  people: number;
+  places: number;
+  epochs: number;
+  events: number;
+  groups: number;
+}
+
+export interface RecentPullable {
+  entity_type: EntityType;
+  id: number;
+  title: string;
+  created_at: string;
 }
 
 export interface EntitySearchResult {

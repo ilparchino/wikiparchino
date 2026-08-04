@@ -533,6 +533,7 @@ export function AdminActivityPage() {
   const [actor, setActor] = useState('');
   const [source, setSource] = useState<AdminActivitySource | ''>('');
   const [action, setAction] = useState('');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const users = useAdminData(api.adminUsers, []);
   const activity = useAdminData(
     () => api.adminActivity({
@@ -541,8 +542,9 @@ export function AdminActivityPage() {
       actorUserId: actor ? Number(actor) : undefined,
       source: source || undefined,
       action: action || undefined,
+      order,
     }),
-    [page, actor, source, action],
+    [page, actor, source, action, order],
   );
   const totalPages = activity.data ? Math.max(1, Math.ceil(activity.data.total / activity.data.page_size)) : 1;
 
@@ -551,9 +553,10 @@ export function AdminActivityPage() {
       <AdminBackLink />
       <h1 className="h2 mt-2 mb-4">Attività del sistema</h1>
       <div className="border rounded bg-body p-3 mb-4"><div className="row g-3">
-        <div className="col-md-4"><label className="form-label" htmlFor="activity-user">Utente</label><select className="form-select" id="activity-user" value={actor} onChange={(event) => { setActor(event.target.value); setPage(1); }}><option value="">Tutti</option>{users.data?.map((user) => <option value={user.id} key={user.id}>{user.display_name}</option>)}</select></div>
-        <div className="col-md-4"><label className="form-label" htmlFor="activity-source">Origine</label><select className="form-select" id="activity-source" value={source} onChange={(event) => { setSource(event.target.value as AdminActivitySource | ''); setPage(1); }}><option value="">Tutte</option><option value="content">Contenuti</option><option value="account">Account</option><option value="authentication">Accessi</option></select></div>
-        <div className="col-md-4"><label className="form-label" htmlFor="activity-action">Azione</label><select className="form-select" id="activity-action" value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}><option value="">Tutte</option>{Object.entries(actionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
+        <div className="col-md-6 col-xl-3"><label className="form-label" htmlFor="activity-user">Utente</label><select className="form-select" id="activity-user" value={actor} onChange={(event) => { setActor(event.target.value); setPage(1); }}><option value="">Tutti</option>{users.data?.map((user) => <option value={user.id} key={user.id}>{user.display_name}</option>)}</select></div>
+        <div className="col-md-6 col-xl-3"><label className="form-label" htmlFor="activity-source">Origine</label><select className="form-select" id="activity-source" value={source} onChange={(event) => { setSource(event.target.value as AdminActivitySource | ''); setPage(1); }}><option value="">Tutte</option><option value="content">Contenuti</option><option value="account">Account</option><option value="authentication">Accessi</option></select></div>
+        <div className="col-md-6 col-xl-3"><label className="form-label" htmlFor="activity-action">Azione</label><select className="form-select" id="activity-action" value={action} onChange={(event) => { setAction(event.target.value); setPage(1); }}><option value="">Tutte</option>{Object.entries(actionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
+        <div className="col-md-6 col-xl-3"><label className="form-label" htmlFor="activity-order">Ordine</label><select className="form-select" id="activity-order" value={order} onChange={(event) => { setOrder(event.target.value as 'asc' | 'desc'); setPage(1); }}><option value="desc">Più recenti</option><option value="asc">Meno recenti</option></select></div>
       </div></div>
       {activity.loading && <LoadingIndicator variant="section" appearance="logo" />}
       {activity.error && <ErrorAlert message={activity.error} />}
